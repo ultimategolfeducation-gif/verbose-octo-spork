@@ -1,0 +1,22 @@
+{
+  "name": "forcemap-licensing",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "ForceMap Stripe to Keygen licensing backend.",
+  "scripts": {
+    "start": "node src/server.js",
+    "dev": "node --watch src/server.js",
+    "test": "node --test"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "dependencies": {
+    "dotenv": "^16.4.7",
+    "express": "^4.21.2",
+    "nodemailer": "^8.0.10",
+    "stripe": "^17.6.0"
+  },
+  "devDependencies": {}
+}
