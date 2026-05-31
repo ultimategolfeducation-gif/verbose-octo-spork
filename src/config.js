@@ -19,7 +19,7 @@ const REQUIRED_ENV = [
 
 export function getConfig() {
   return {
-    port: Number(process.env.PORT || 3000),
+    port: Number(process.env.APP_PORT || 3000),
     nodeEnv: process.env.NODE_ENV || 'development',
     stripeSecretKey: process.env.STRIPE_SECRET_KEY,
     stripeWebhookSecret: process.env.STRIPE_WEBHOOK_SECRET,
