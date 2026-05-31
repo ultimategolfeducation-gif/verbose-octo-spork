@@ -6,9 +6,10 @@ assertRequiredEnv();
 
 const app = createApp();
 const config = getConfig();
+const host = process.env.HOST || '0.0.0.0';
 
-app.listen(config.port, () => {
-  console.log(`ForceMap licensing backend listening on port ${config.port}`);
+app.listen(config.port, host, () => {
+  console.log(`ForceMap licensing backend listening on ${host}:${config.port}`);
 });
 
 setInterval(() => {
