@@ -9,10 +9,8 @@ const REQUIRED_ENV = [
   'KEYGEN_PRODUCT_ID',
   'KEYGEN_POLICY_ID',
   'KEYGEN_API_TOKEN',
-  'SMTP_HOST',
-  'SMTP_PORT',
-  'SMTP_USER',
-  'SMTP_PASSWORD',
+  'MAILERSEND_API_TOKEN',
+  'MAILERSEND_FROM_EMAIL',
   'DOWNLOAD_URL',
   'ADMIN_API_TOKEN'
 ];
@@ -27,13 +25,14 @@ export function getConfig() {
     keygenProductId: process.env.KEYGEN_PRODUCT_ID,
     keygenPolicyId: process.env.KEYGEN_POLICY_ID,
     keygenApiToken: process.env.KEYGEN_API_TOKEN,
-    smtpHost: process.env.SMTP_HOST,
-    smtpPort: Number(process.env.SMTP_PORT || 587),
-    smtpUser: process.env.SMTP_USER,
-    smtpPassword: process.env.SMTP_PASSWORD,
-    smtpFrom:
-      process.env.SMTP_FROM ||
-      'ForceMap by Ultimate Golf Education <info@ultimategolfeducation.com>',
+    mailerSendApiToken: process.env.MAILERSEND_API_TOKEN,
+    mailerSendFromEmail: process.env.MAILERSEND_FROM_EMAIL,
+    mailerSendFromName:
+      process.env.MAILERSEND_FROM_NAME || 'ForceMap by Ultimate Golf Education',
+    mailerSendReplyToEmail:
+      process.env.MAILERSEND_REPLY_TO_EMAIL || 'info@ultimategolfeducation.com',
+    mailerSendReplyToName:
+      process.env.MAILERSEND_REPLY_TO_NAME || 'Ultimate Golf Education',
     downloadUrl: process.env.DOWNLOAD_URL,
     adminApiToken: process.env.ADMIN_API_TOKEN,
     taskApiToken: process.env.TASK_API_TOKEN || process.env.ADMIN_API_TOKEN

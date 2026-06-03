@@ -1,33 +1,55 @@
-import nodemailer from 'nodemailer';
 import { getConfig } from './config.js';
 
-let transporter;
+const MAILERSEND_EMAIL_URL = 'https://api.mailersend.com/v1/email';
 
-function mailer() {
-  if (!transporter) {
-    const config = getConfig();
-    transporter = nodemailer.createTransport({
-      host: config.smtpHost,
-      port: config.smtpPort,
-      secure: config.smtpPort === 465,
-      family: 4,
-      auth: {
-        user: config.smtpUser,
-        pass: config.smtpPassword
-      }
-    });
+async function responseBody(response) {
+  const text = await response.text();
+  if (!text) {
+    return '';
   }
-  return transporter;
+
+  try {
+    return JSON.stringify(JSON.parse(text));
+  } catch {
+    return text;
+  }
 }
 
 async function sendMail({ to, subject, text }) {
   const config = getConfig();
-  return mailer().sendMail({
-    from: config.smtpFrom,
-    to,
-    subject,
-    text
+  const response = await fetch(MAILERSEND_EMAIL_URL, {
+    method: 'POST',
+    headers: {
+      Authorization: `Bearer ${config.mailerSendApiToken}`,
+      'Content-Type': 'application/json'
+    },
+    body: JSON.stringify({
+      from: {
+        email: config.mailerSendFromEmail,
+        name: config.mailerSendFromName
+      },
+      to: [{ email: to }],
+      reply_to: {
+        email: config.mailerSendReplyToEmail,
+        name: config.mailerSendReplyToName
+      },
+      subject,
+      text
+    })
   });
+
+  if (!response.ok) {
+    throw new Error(
+      `MailerSend email failed with ${response.status}: ${await responseBody(response)}`
+    );
+  }
+
+  return {
+    messageId: response.headers.get('x-message-id') || '',
+    sendPaused: response.headers.get('x-send-paused') === 'true',
+    subject,
+    to
+  };
 }
 
 export async function sendWelcomeEmail({ email, licenseKey }) {

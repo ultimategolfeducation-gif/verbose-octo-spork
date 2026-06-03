@@ -57,13 +57,13 @@ KEYGEN_PRODUCT_ID=
 KEYGEN_POLICY_ID=
 KEYGEN_API_TOKEN=
 
-SMTP_HOST=
-SMTP_PORT=
-SMTP_USER=
-SMTP_PASSWORD=
-SMTP_FROM=
+MAILERSEND_API_TOKEN=
+MAILERSEND_FROM_EMAIL=software@ultimategolfeducation.com
+MAILERSEND_FROM_NAME=ForceMap by Ultimate Golf Education
+MAILERSEND_REPLY_TO_EMAIL=info@ultimategolfeducation.com
+MAILERSEND_REPLY_TO_NAME=Ultimate Golf Education
 
-DOWNLOAD_URL=
+DOWNLOAD_URL=https://learn.ultimategolfeducation.com/forcemap-download
 ADMIN_API_TOKEN=
 TASK_API_TOKEN=
 ```
@@ -122,7 +122,17 @@ machine.delete
 
 ## Email Setup
 
-Use any SMTP service already trusted for Ultimate Golf Education email. The welcome email sends:
+Use MailerSend's Email API for transactional emails. Create a MailerSend API token for the verified `ultimategolfeducation.com` sending domain, then set these Railway variables:
+
+```text
+MAILERSEND_API_TOKEN=
+MAILERSEND_FROM_EMAIL=software@ultimategolfeducation.com
+MAILERSEND_FROM_NAME=ForceMap by Ultimate Golf Education
+MAILERSEND_REPLY_TO_EMAIL=info@ultimategolfeducation.com
+MAILERSEND_REPLY_TO_NAME=Ultimate Golf Education
+```
+
+The welcome email sends:
 
 ```text
 Subject: Welcome to ForceMap by Ultimate Golf Education
