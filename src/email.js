@@ -10,6 +10,7 @@ function mailer() {
       host: config.smtpHost,
       port: config.smtpPort,
       secure: config.smtpPort === 465,
+      family: 4,
       auth: {
         user: config.smtpUser,
         pass: config.smtpPassword

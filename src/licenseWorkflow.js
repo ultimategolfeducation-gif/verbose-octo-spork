@@ -47,11 +47,6 @@ export async function provisionLicenseFromCheckout(session) {
     throw new Error('Checkout session does not include a subscription and customer.');
   }
 
-  const existing = await findLicenseByMetadata('stripeSubscriptionId', subscriptionId);
-  if (existing) {
-    return { license: existing, created: false };
-  }
-
   const [subscription, customer] = await Promise.all([
     retrieveSubscription(subscriptionId),
     retrieveCustomer(customerId)
@@ -60,6 +55,20 @@ export async function provisionLicenseFromCheckout(session) {
 
   if (!email) {
     throw new Error('Checkout session does not include a customer email.');
+  }
+
+  const existing = await findLicenseByMetadata('stripeSubscriptionId', subscriptionId);
+  if (existing) {
+    if (!existing.attributes?.metadata?.welcomeEmailSentAt) {
+      await sendWelcomeEmail({
+        email,
+        licenseKey: existing.attributes.key
+      });
+      await updateLicenseMetadata(existing, {
+        welcomeEmailSentAt: new Date().toISOString()
+      });
+    }
+    return { license: existing, created: false };
   }
 
   const price = subscription.items?.data?.[0]?.price;
@@ -94,6 +103,10 @@ export async function provisionLicenseFromCheckout(session) {
   await sendWelcomeEmail({
     email,
     licenseKey: license.attributes.key
+  });
+
+  await updateLicenseMetadata(license, {
+    welcomeEmailSentAt: new Date().toISOString()
   });
 
   return { license, created: true };
