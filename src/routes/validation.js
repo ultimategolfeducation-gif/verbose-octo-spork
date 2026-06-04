@@ -26,13 +26,10 @@ validationRouter.post(
       });
     }
 
-    const validation = await validateLicenseKey({
-      licenseKey,
-      fingerprint: machineFingerprint
-    });
-    const valid = Boolean(validation.meta?.valid);
-    const license = validation.data;
-    const suspended = Boolean(license?.attributes?.suspended);
+    let validation = await validateLicenseKey({ licenseKey });
+    let valid = Boolean(validation.meta?.valid);
+    let license = validation.data;
+    let suspended = Boolean(license?.attributes?.suspended);
 
     if (!valid || suspended) {
       return res.status(403).json({
@@ -56,9 +53,38 @@ validationRouter.post(
         });
       } catch (error) {
         const status = error.statusCode;
-        if (status !== 409 && status !== 422) {
+        if (status === 409) {
+          // Already activated for this machine. Confirm below with fingerprint validation.
+        } else if (status === 422) {
+          return res.status(403).json({
+            allowed: false,
+            code: 'LICENSE_ACTIVATION_LIMIT',
+            detail:
+              error.message ||
+              'This ForceMap license has reached its activation limit.'
+          });
+        } else {
           throw error;
         }
+      }
+
+      validation = await validateLicenseKey({
+        licenseKey,
+        fingerprint: machineFingerprint
+      });
+      valid = Boolean(validation.meta?.valid);
+      license = validation.data || license;
+      suspended = Boolean(license?.attributes?.suspended);
+
+      if (!valid || suspended) {
+        return res.status(403).json({
+          allowed: false,
+          code: suspended ? 'LICENSE_SUSPENDED' : validation.meta?.code || 'LICENSE_INVALID',
+          detail:
+            suspended
+              ? 'This ForceMap license is suspended.'
+              : validation.meta?.detail || 'This ForceMap license is not valid for this computer.'
+        });
       }
     }
 
