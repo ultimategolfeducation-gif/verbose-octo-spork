@@ -40,7 +40,7 @@ function postJson(server, path, payload) {
   });
 }
 
-test('first-time licence activation validates key before fingerprint', async () => {
+test('first-time licence activation handles an unactivated fingerprint', async () => {
   const originalFetch = globalThis.fetch;
   const originalEnv = {
     KEYGEN_ACCOUNT_ID: process.env.KEYGEN_ACCOUNT_ID,
@@ -58,15 +58,18 @@ test('first-time licence activation validates key before fingerprint', async () 
     requests.push({ url, options, payload });
 
     if (url.endsWith('/licenses/actions/validate-key')) {
-      const hasFingerprint = Boolean(payload.meta?.scope?.fingerprint);
+      const validationAttempt = requests.filter((request) =>
+        request.url.endsWith('/licenses/actions/validate-key')
+      ).length;
       return new Response(
         JSON.stringify({
           meta: {
-            valid: true,
-            code: hasFingerprint ? 'FINGERPRINT_SCOPE_VALID' : 'VALID',
-            detail: hasFingerprint
-              ? 'License is valid for this machine.'
-              : 'License is valid.'
+            valid: validationAttempt > 1,
+            code: validationAttempt > 1 ? 'FINGERPRINT_SCOPE_VALID' : 'NO_MACHINE',
+            detail:
+              validationAttempt > 1
+                ? 'License is valid for this machine.'
+                : 'fingerprint is not activated (has no associated machines)'
           },
           data: {
             id: 'lic_123',
@@ -114,7 +117,7 @@ test('first-time licence activation validates key before fingerprint', async () 
 
     assert.equal(requests.length, 3);
     assert.equal(requests[0].payload.meta.key, 'FORCEMAP-STAFF');
-    assert.equal(requests[0].payload.meta.scope.fingerprint, undefined);
+    assert.equal(requests[0].payload.meta.scope.fingerprint, 'machine-fingerprint-123');
     assert.equal(requests[1].payload.data.attributes.fingerprint, 'machine-fingerprint-123');
     assert.equal(requests[2].payload.meta.scope.fingerprint, 'machine-fingerprint-123');
   } finally {

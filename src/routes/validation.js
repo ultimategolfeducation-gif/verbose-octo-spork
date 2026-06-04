@@ -7,6 +7,26 @@ import { asyncHandler } from '../errors.js';
 
 export const validationRouter = express.Router();
 
+function isFirstActivationFailure(validation) {
+  const detail = String(validation?.meta?.detail || '').toLowerCase();
+  return (
+    detail.includes('fingerprint is not activated') ||
+    detail.includes('has no associated machines')
+  );
+}
+
+function validationFailurePayload(validation, license, fallbackDetail) {
+  const suspended = Boolean(license?.attributes?.suspended);
+  return {
+    allowed: false,
+    code: suspended ? 'LICENSE_SUSPENDED' : validation.meta?.code || 'LICENSE_INVALID',
+    detail:
+      suspended
+        ? 'This ForceMap license is suspended.'
+        : validation.meta?.detail || fallbackDetail
+  };
+}
+
 validationRouter.post(
   '/validate',
   asyncHandler(async (req, res) => {
@@ -26,23 +46,15 @@ validationRouter.post(
       });
     }
 
-    let validation = await validateLicenseKey({ licenseKey });
+    let validation = await validateLicenseKey({
+      licenseKey,
+      fingerprint: machineFingerprint
+    });
     let valid = Boolean(validation.meta?.valid);
     let license = validation.data;
     let suspended = Boolean(license?.attributes?.suspended);
 
-    if (!valid || suspended) {
-      return res.status(403).json({
-        allowed: false,
-        code: suspended ? 'LICENSE_SUSPENDED' : validation.meta?.code || 'LICENSE_INVALID',
-        detail:
-          suspended
-            ? 'This ForceMap license is suspended.'
-            : validation.meta?.detail || 'This ForceMap license is not valid.'
-      });
-    }
-
-    if (activate && machineFingerprint && license?.id) {
+    if (!valid && activate && machineFingerprint && license?.id && isFirstActivationFailure(validation)) {
       try {
         await activateMachine({
           licenseId: license.id,
@@ -75,17 +87,16 @@ validationRouter.post(
       valid = Boolean(validation.meta?.valid);
       license = validation.data || license;
       suspended = Boolean(license?.attributes?.suspended);
+    }
 
-      if (!valid || suspended) {
-        return res.status(403).json({
-          allowed: false,
-          code: suspended ? 'LICENSE_SUSPENDED' : validation.meta?.code || 'LICENSE_INVALID',
-          detail:
-            suspended
-              ? 'This ForceMap license is suspended.'
-              : validation.meta?.detail || 'This ForceMap license is not valid for this computer.'
-        });
-      }
+    if (!valid || suspended) {
+      return res.status(403).json(
+        validationFailurePayload(
+          validation,
+          license,
+          'This ForceMap license is not valid for this computer.'
+        )
+      );
     }
 
     res.json({
