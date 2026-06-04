@@ -154,7 +154,6 @@ export async function validateLicenseKey({ licenseKey, fingerprint }) {
 export async function activateMachine({ licenseId, licenseKey, fingerprint, name, platform }) {
   return keygenRequest('/machines', {
     method: 'POST',
-    authHeader: `License ${licenseKey}`,
     body: JSON.stringify({
       data: {
         type: 'machines',
