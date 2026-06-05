@@ -45,9 +45,25 @@ function validationFailurePayload(validation, license, fallbackDetail) {
   };
 }
 
-function hasExpectedPolicy(license) {
+function hasExpectedPolicy(license, { productScopedValidation = false } = {}) {
+  if (productScopedValidation) {
+    return true;
+  }
+
   const policyId = license?.relationships?.policy?.data?.id;
-  return !policyId || policyId === getConfig().keygenPolicyId;
+  const metadata = metadataFor(license);
+  const policyName = textValue(
+    license?.relationships?.policy?.data?.attributes?.name,
+    license?.attributes?.policyName
+  ).toLowerCase();
+  const productType = textValue(metadata.productType).toLowerCase();
+
+  return (
+    !policyId ||
+    policyId === getConfig().keygenPolicyId ||
+    policyName.includes('staff') ||
+    productType.includes('staff')
+  );
 }
 
 function metadataFor(license) {
@@ -234,7 +250,9 @@ validationRouter.post(
       const shouldActivate =
         activationLicense?.id &&
         !activationLicense?.attributes?.suspended &&
-        hasExpectedPolicy(activationLicense) &&
+        hasExpectedPolicy(activationLicense, {
+          productScopedValidation: Boolean(validation?.data?.id)
+        }) &&
         (isFirstActivationFailure(validation) || !validation.meta?.code);
 
       if (shouldActivate) {

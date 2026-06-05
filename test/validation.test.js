@@ -21,6 +21,27 @@ const ACTIVE_LICENSE = {
   }
 };
 
+const STAFF_LICENSE = {
+  id: 'staff_lic_123',
+  attributes: {
+    status: 'ACTIVE',
+    suspended: false,
+    metadata: {
+      productType: 'staff',
+      customerName: 'Mark Ashton',
+      customerEmail: 'ultimategolfeducation@gmail.com'
+    }
+  },
+  relationships: {
+    policy: {
+      data: {
+        id: 'staff_policy_123',
+        type: 'policies'
+      }
+    }
+  }
+};
+
 function postJson(server, path, payload) {
   const body = JSON.stringify(payload);
   const { port } = server.address();
@@ -165,6 +186,56 @@ test('first-time licence activation handles an unactivated fingerprint response'
       assert.equal(requests[2].payload.meta.scope.fingerprint, 'machine-fingerprint-123');
       assert.match(requests[3].url, /\/licenses\/lic_123$/);
       assert.match(requests[4].url, /\/machines\?limit=100$/);
+    }
+  );
+});
+
+test('first-time staff licence activation is allowed on the staff policy', async () => {
+  await withValidationServer(
+    async (url, _options, _payload, requests) => {
+      if (url.endsWith('/licenses/actions/validate-key')) {
+        const validationAttempt = requests.filter((request) =>
+          request.url.endsWith('/licenses/actions/validate-key')
+        ).length;
+        return validationResponse({
+          valid: validationAttempt > 1,
+          code: validationAttempt > 1 ? 'FINGERPRINT_SCOPE_VALID' : 'NO_MACHINE',
+          detail:
+            validationAttempt > 1
+              ? 'License is valid for this machine.'
+              : 'fingerprint is not activated (has no associated machine)',
+          data: STAFF_LICENSE
+        });
+      }
+      if (url.endsWith('/machines')) {
+        return machineResponse();
+      }
+      if (url.endsWith('/licenses/staff_lic_123')) {
+        return new Response(JSON.stringify({ data: STAFF_LICENSE }), { status: 200 });
+      }
+      if (url.endsWith('/machines?limit=100')) {
+        return new Response(JSON.stringify({ data: [] }), { status: 200 });
+      }
+      return new Response(JSON.stringify({ errors: [{ detail: 'Unexpected request.' }] }), {
+        status: 500
+      });
+    },
+    async (server, requests) => {
+      const response = await postJson(server, '/api/license/validate', {
+        licenseKey: 'FORCEMAP-STAFF',
+        machineFingerprint: 'machine-fingerprint-123',
+        machineName: 'Mark test computer',
+        platform: 'Windows',
+        activate: true
+      });
+
+      assert.equal(response.status, 200);
+      assert.equal(response.body.allowed, true);
+      assert.equal(response.body.planName, 'Pro Staff');
+      assert.equal(response.body.registeredName, 'Mark Ashton');
+      assert.equal(response.body.deviceLimit, 'Unlimited');
+      assert.equal(requests.length, 5);
+      assert.equal(requests[1].payload.data.relationships.license.data.id, 'staff_lic_123');
     }
   );
 });
