@@ -4,7 +4,9 @@ import { stripeWebhookRouter } from './routes/stripeWebhook.js';
 import { validationRouter } from './routes/validation.js';
 import {
   adminLimiter,
+  billingPortalLicenceLimiter,
   billingPortalLimiter,
+  licenseKeyValidationLimiter,
   licenseValidationLimiter,
   stripeWebhookLimiter
 } from './rateLimits.js';
@@ -19,8 +21,8 @@ export function createApp() {
 
   app.use('/webhooks/stripe', stripeWebhookLimiter, stripeWebhookRouter);
   app.use(express.json({ limit: '1mb' }));
-  app.use('/api/license/validate', licenseValidationLimiter);
-  app.use('/api/license/billing-portal', billingPortalLimiter);
+  app.use('/api/license/validate', licenseKeyValidationLimiter, licenseValidationLimiter);
+  app.use('/api/license/billing-portal', billingPortalLicenceLimiter, billingPortalLimiter);
   app.use('/api/license', validationRouter);
   app.use('/admin', adminLimiter, adminRouter);
 
