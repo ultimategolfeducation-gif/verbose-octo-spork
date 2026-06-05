@@ -1,11 +1,11 @@
 import { createHash } from 'node:crypto';
 
-function hashValue(value) {
+export function hashValue(value) {
   const text = String(value || '').trim();
   return text ? createHash('sha256').update(text).digest('hex').slice(0, 12) : '';
 }
 
-function clientIp(req) {
+export function clientIp(req) {
   return req.ip || req.get?.('x-forwarded-for')?.split(',')[0]?.trim() || '';
 }
 

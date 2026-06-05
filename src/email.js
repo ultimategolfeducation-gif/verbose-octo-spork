@@ -123,3 +123,11 @@ Support:
 info@ultimategolfeducation.com`
   });
 }
+
+export async function sendAbuseAlertEmail({ subject, text }) {
+  return sendMail({
+    to: getConfig().abuseAlertEmail,
+    subject,
+    text
+  });
+}

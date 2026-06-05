@@ -3,6 +3,10 @@ import assert from 'node:assert/strict';
 import http from 'node:http';
 
 import { createApp } from '../src/app.js';
+import {
+  resetAbuseMonitorForTests,
+  setAbuseAlertSenderForTests
+} from '../src/abuseMonitor.js';
 import { setStripeClientForTests } from '../src/clients/stripeClient.js';
 
 const ACTIVE_LICENSE = {
@@ -92,6 +96,8 @@ async function withValidationServer(fetchHandler, callback) {
   process.env.KEYGEN_PRODUCT_ID = 'product_123';
   process.env.KEYGEN_POLICY_ID = 'policy_123';
   process.env.KEYGEN_API_TOKEN = 'keygen-token';
+  resetAbuseMonitorForTests();
+  setAbuseAlertSenderForTests(async () => ({}));
 
   globalThis.fetch = async (url, options) => {
     const payload = options.body ? JSON.parse(options.body) : {};
@@ -106,6 +112,7 @@ async function withValidationServer(fetchHandler, callback) {
   } finally {
     await new Promise((resolve) => server.close(resolve));
     setStripeClientForTests(null);
+    resetAbuseMonitorForTests();
     globalThis.fetch = originalFetch;
     for (const [name, value] of Object.entries(originalEnv)) {
       if (value === undefined) {

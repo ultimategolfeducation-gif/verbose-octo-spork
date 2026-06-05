@@ -35,6 +35,7 @@ export function getConfig() {
       process.env.MAILERSEND_REPLY_TO_EMAIL || 'info@ultimategolfeducation.com',
     mailerSendReplyToName:
       process.env.MAILERSEND_REPLY_TO_NAME || 'Ultimate Golf Education',
+    abuseAlertEmail: process.env.ABUSE_ALERT_EMAIL || 'info@ultimategolfeducation.com',
     downloadUrl: process.env.DOWNLOAD_URL,
     adminApiToken: process.env.ADMIN_API_TOKEN,
     taskApiToken: process.env.TASK_API_TOKEN || process.env.ADMIN_API_TOKEN

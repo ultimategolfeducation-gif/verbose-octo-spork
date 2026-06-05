@@ -11,12 +11,13 @@ import {
 } from '../clients/stripeClient.js';
 import { getConfig } from '../config.js';
 import { asyncHandler } from '../errors.js';
+import { recordAbuseEvent } from '../abuseMonitor.js';
 import {
   billingPortalSchema,
   licenseValidationSchema,
   validatePayload
 } from '../requestValidation.js';
-import { auditEvent, licenseHash } from '../securityAudit.js';
+import { auditEvent, clientIp, licenseHash } from '../securityAudit.js';
 
 export const validationRouter = express.Router();
 
@@ -237,6 +238,27 @@ async function resolveActivationLicense(validation, licenseKey) {
   }
 }
 
+function abuseFields(req, { licenseKey, machineFingerprint, code, profile = {} }) {
+  return {
+    ip: clientIp(req),
+    licenseKey,
+    machineFingerprint,
+    code,
+    planName: profile.planName,
+    registeredName: profile.registeredName,
+    registeredEmail: profile.registeredEmail
+  };
+}
+
+function profileSummaryFromLicense(license) {
+  const metadata = metadataFor(license);
+  return {
+    planName: normalisePlanName(metadata.productType, license),
+    registeredName: nameValue(metadata.customerName, licenseNameValue(license)),
+    registeredEmail: textValue(metadata.customerEmail)
+  };
+}
+
 validationRouter.post(
   '/validate',
   asyncHandler(async (req, res) => {
@@ -247,6 +269,12 @@ validationRouter.post(
       platform,
       activate
     } = validatePayload(req.body || {}, licenseValidationSchema);
+    let activatedMachine = false;
+
+    void recordAbuseEvent(
+      'validation_attempt',
+      abuseFields(req, { licenseKey, machineFingerprint })
+    );
 
     let validation = await validateLicenseKey({
       licenseKey,
@@ -271,6 +299,10 @@ validationRouter.post(
           license: licenseHash(licenseKey),
           licenseId: activationLicense.id
         });
+        void recordAbuseEvent(
+          'activation_attempt',
+          abuseFields(req, { licenseKey, machineFingerprint, code: validation.meta?.code })
+        );
         try {
           await activateMachine({
             licenseId: activationLicense.id,
@@ -279,6 +311,7 @@ validationRouter.post(
             name: machineName || 'ForceMap Windows device',
             platform: platform || 'Windows'
           });
+          activatedMachine = true;
         } catch (error) {
           const status = error.statusCode;
           if (status === 409) {
@@ -288,6 +321,10 @@ validationRouter.post(
               license: licenseHash(licenseKey),
               licenseId: activationLicense.id
             });
+            void recordAbuseEvent(
+              'activation_limit',
+              abuseFields(req, { licenseKey, machineFingerprint, code: 'LICENSE_ACTIVATION_LIMIT' })
+            );
             return res.status(403).json({
               allowed: false,
               code: 'LICENSE_ACTIVATION_LIMIT',
@@ -315,6 +352,14 @@ validationRouter.post(
         license: licenseHash(licenseKey),
         code: suspended ? 'LICENSE_SUSPENDED' : validation.meta?.code || 'LICENSE_INVALID'
       });
+      void recordAbuseEvent(
+        'validation_failed',
+        abuseFields(req, {
+          licenseKey,
+          machineFingerprint,
+          code: suspended ? 'LICENSE_SUSPENDED' : validation.meta?.code || 'LICENSE_INVALID'
+        })
+      );
       return res.status(403).json(
         validationFailurePayload(
           validation,
@@ -325,6 +370,18 @@ validationRouter.post(
     }
 
     const profile = await licenseProfilePayload(license);
+    if (activatedMachine) {
+      void recordAbuseEvent(
+        'successful_activation',
+        abuseFields(req, { licenseKey, machineFingerprint, profile })
+      );
+    }
+    if (String(profile.planName || '').toLowerCase().includes('staff')) {
+      void recordAbuseEvent(
+        'staff_license_used',
+        abuseFields(req, { licenseKey, machineFingerprint, profile })
+      );
+    }
 
     res.json({
       allowed: true,
@@ -356,6 +413,14 @@ validationRouter.post(
         license: licenseHash(licenseKey),
         code: billingLicense.payload.code
       });
+      void recordAbuseEvent(
+        'validation_failed',
+        abuseFields(req, {
+          licenseKey,
+          machineFingerprint,
+          code: billingLicense.payload.code
+        })
+      );
       return res.status(403).json({
         ok: false,
         ...billingLicense.payload
@@ -386,6 +451,14 @@ validationRouter.post(
     auditEvent(req, 'billing_portal_created', {
       license: licenseHash(licenseKey)
     });
+    void recordAbuseEvent(
+      'billing_portal_opened',
+      abuseFields(req, {
+        licenseKey,
+        machineFingerprint,
+        profile: profileSummaryFromLicense(billingLicense.license)
+      })
+    );
 
     res.json({
       ok: true,

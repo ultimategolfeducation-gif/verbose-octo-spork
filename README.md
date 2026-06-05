@@ -62,6 +62,7 @@ MAILERSEND_FROM_EMAIL=software@ultimategolfeducation.com
 MAILERSEND_FROM_NAME=ForceMap by Ultimate Golf Education
 MAILERSEND_REPLY_TO_EMAIL=info@ultimategolfeducation.com
 MAILERSEND_REPLY_TO_NAME=Ultimate Golf Education
+ABUSE_ALERT_EMAIL=info@ultimategolfeducation.com
 
 DOWNLOAD_URL=https://learn.ultimategolfeducation.com/forcemap-download
 ADMIN_API_TOKEN=
@@ -130,6 +131,7 @@ MAILERSEND_FROM_EMAIL=software@ultimategolfeducation.com
 MAILERSEND_FROM_NAME=ForceMap by Ultimate Golf Education
 MAILERSEND_REPLY_TO_EMAIL=info@ultimategolfeducation.com
 MAILERSEND_REPLY_TO_NAME=Ultimate Golf Education
+ABUSE_ALERT_EMAIL=info@ultimategolfeducation.com
 ```
 
 The welcome email sends:
@@ -251,12 +253,13 @@ Recommended desktop behavior:
 - Public JSON endpoints reject unexpected fields and enforce type, length, and allowed-value checks before calling Stripe, Keygen, MailerSend, or admin workflows.
 - `/api/license/validate` is protected by per-IP and per-licence-key rate limits.
 - `/api/license/billing-portal`, `/admin`, and `/webhooks/stripe` have separate rate limits.
+- The abuse monitor sends MailerSend alerts to `ABUSE_ALERT_EMAIL` for activation-limit hits, one licence used on 3+ machines in 24 hours, 10+ failed validations in 1 hour, one IP trying 5+ licence keys in 1 hour, and staff licence use from a device/network.
 - Stripe webhooks use signature verification against the raw request body.
 - Duplicate checkout events are idempotent because licences are looked up by `stripeSubscriptionId` before creation.
 - Payment/subscription/access status is sourced from Stripe and Keygen, never from the desktop app.
 - Security logs use event codes and masked hashes. Do not log full licence keys, tokens, card/payment details, webhook payloads, or sensitive customer data.
 - The desktop app may use saved validation during temporary service outages, but offline grace must not extend past a cancelled/expired access end date.
-- TODO: Configure live alerting for Railway usage spikes, repeated rate-limit events, webhook failures, and failed licence validation bursts.
+- TODO: Configure Railway usage/spend alerts in Railway billing settings.
 - TODO: Consider Cloudflare/WAF protection for `license.ultimategolfeducation.com` once DNS/proxy ownership is ready.
 
 ## Admin Endpoints
