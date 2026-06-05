@@ -181,6 +181,16 @@ export async function listMachines() {
   });
 }
 
+export async function listMachinesForLicense(licenseId) {
+  const machines = await keygenRequest('/machines?limit=100', {
+    method: 'GET'
+  });
+  const data = machines.data || [];
+  return data.filter(
+    (machine) => machine.relationships?.license?.data?.id === licenseId
+  );
+}
+
 export async function deleteMachine(machineId) {
   return keygenRequest(`/machines/${encodeURIComponent(machineId)}`, {
     method: 'DELETE'

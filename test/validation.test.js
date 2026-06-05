@@ -135,6 +135,12 @@ test('first-time licence activation handles an unactivated fingerprint response'
       if (url.endsWith('/machines')) {
         return machineResponse();
       }
+      if (url.endsWith('/licenses/lic_123')) {
+        return new Response(JSON.stringify({ data: ACTIVE_LICENSE }), { status: 200 });
+      }
+      if (url.endsWith('/machines?limit=100')) {
+        return new Response(JSON.stringify({ data: [] }), { status: 200 });
+      }
       return new Response(JSON.stringify({ errors: [{ detail: 'Unexpected request.' }] }), {
         status: 500
       });
@@ -151,10 +157,12 @@ test('first-time licence activation handles an unactivated fingerprint response'
       assert.equal(response.status, 200);
       assert.equal(response.body.allowed, true);
       assert.equal(response.body.code, 'FINGERPRINT_SCOPE_VALID');
-      assert.equal(requests.length, 3);
+      assert.equal(requests.length, 5);
       assert.equal(requests[0].payload.meta.scope.fingerprint, 'machine-fingerprint-123');
       assert.equal(requests[1].payload.data.attributes.fingerprint, 'machine-fingerprint-123');
       assert.equal(requests[2].payload.meta.scope.fingerprint, 'machine-fingerprint-123');
+      assert.match(requests[3].url, /\/licenses\/lic_123$/);
+      assert.match(requests[4].url, /\/machines\?limit=100$/);
     }
   );
 });
@@ -182,6 +190,12 @@ test('first-time licence activation retrieves a real licence after a generic inv
       if (url.endsWith('/machines')) {
         return machineResponse();
       }
+      if (url.endsWith('/licenses/lic_123')) {
+        return new Response(JSON.stringify({ data: ACTIVE_LICENSE }), { status: 200 });
+      }
+      if (url.endsWith('/machines?limit=100')) {
+        return new Response(JSON.stringify({ data: [] }), { status: 200 });
+      }
       return new Response(JSON.stringify({ errors: [{ detail: 'Unexpected request.' }] }), {
         status: 500
       });
@@ -198,11 +212,227 @@ test('first-time licence activation retrieves a real licence after a generic inv
       assert.equal(response.status, 200);
       assert.equal(response.body.allowed, true);
       assert.equal(response.body.code, 'FINGERPRINT_SCOPE_VALID');
-      assert.equal(requests.length, 4);
+      assert.equal(requests.length, 6);
       assert.equal(requests[0].payload.meta.scope.fingerprint, 'machine-fingerprint-123');
       assert.match(requests[1].url, /\/licenses\/FORCEMAP-STAFF$/);
       assert.equal(requests[2].payload.data.attributes.fingerprint, 'machine-fingerprint-123');
       assert.equal(requests[3].payload.meta.scope.fingerprint, 'machine-fingerprint-123');
+      assert.match(requests[4].url, /\/licenses\/lic_123$/);
+      assert.match(requests[5].url, /\/machines\?limit=100$/);
+    }
+  );
+});
+
+test('valid monthly licence returns customer profile fields for the desktop app', async () => {
+  const monthlyLicense = {
+    ...ACTIVE_LICENSE,
+    attributes: {
+      ...ACTIVE_LICENSE.attributes,
+      name: 'fallback@example.com',
+      metadata: {
+        customerName: 'Mark Ashton',
+        customerEmail: 'mark@example.com',
+        productType: 'Monthly',
+        stripeCurrentPeriodEnd: '2026-07-05T00:00:00.000Z',
+        accessStatus: 'active',
+        cancellationPending: 'false'
+      }
+    }
+  };
+  const machines = [
+    {
+      id: 'machine_1',
+      relationships: {
+        license: {
+          data: {
+            id: 'lic_123',
+            type: 'licenses'
+          }
+        }
+      }
+    }
+  ];
+
+  await withValidationServer(
+    async (url) => {
+      if (url.endsWith('/licenses/actions/validate-key')) {
+        return validationResponse({
+          valid: true,
+          code: 'VALID',
+          detail: 'License is valid.',
+          data: monthlyLicense
+        });
+      }
+      if (url.endsWith('/licenses/lic_123')) {
+        return new Response(JSON.stringify({ data: monthlyLicense }), { status: 200 });
+      }
+      if (url.endsWith('/machines?limit=100')) {
+        return new Response(JSON.stringify({ data: machines }), { status: 200 });
+      }
+      return new Response(JSON.stringify({ errors: [{ detail: 'Unexpected request.' }] }), {
+        status: 500
+      });
+    },
+    async (server) => {
+      const response = await postJson(server, '/api/license/validate', {
+        licenseKey: 'FORCEMAP-MONTHLY',
+        machineFingerprint: 'machine-fingerprint-123'
+      });
+
+      assert.equal(response.status, 200);
+      assert.equal(response.body.allowed, true);
+      assert.equal(response.body.productName, 'ForceMap');
+      assert.equal(response.body.registeredName, 'Mark Ashton');
+      assert.equal(response.body.registeredEmail, 'mark@example.com');
+      assert.equal(response.body.planName, 'Pro Monthly');
+      assert.equal(response.body.renewsAt, '2026-07-05T00:00:00.000Z');
+      assert.equal(response.body.expiresAt, '');
+      assert.equal(response.body.deviceCount, '1');
+      assert.equal(response.body.billingUrl, '');
+    }
+  );
+});
+
+test('valid staff licence returns pro staff with no renewal or expiry', async () => {
+  const staffLicense = {
+    ...ACTIVE_LICENSE,
+    attributes: {
+      ...ACTIVE_LICENSE.attributes,
+      name: 'Mark Ashton - Staff',
+      metadata: {
+        customerName: 'Mark Ashton',
+        customerEmail: 'mark@ultimategolfeducation.com',
+        productType: 'Staff'
+      }
+    }
+  };
+
+  await withValidationServer(
+    async (url) => {
+      if (url.endsWith('/licenses/actions/validate-key')) {
+        return validationResponse({
+          valid: true,
+          code: 'VALID',
+          detail: 'License is valid.',
+          data: staffLicense
+        });
+      }
+      if (url.endsWith('/licenses/lic_123')) {
+        return new Response(JSON.stringify({ data: staffLicense }), { status: 200 });
+      }
+      if (url.endsWith('/machines?limit=100')) {
+        return new Response(JSON.stringify({ data: [] }), { status: 200 });
+      }
+      return new Response(JSON.stringify({ errors: [{ detail: 'Unexpected request.' }] }), {
+        status: 500
+      });
+    },
+    async (server) => {
+      const response = await postJson(server, '/api/license/validate', {
+        licenseKey: 'FORCEMAP-STAFF',
+        machineFingerprint: 'machine-fingerprint-123'
+      });
+
+      assert.equal(response.status, 200);
+      assert.equal(response.body.planName, 'Pro Staff');
+      assert.equal(response.body.registeredName, 'Mark Ashton');
+      assert.equal(response.body.registeredEmail, 'mark@ultimategolfeducation.com');
+      assert.equal(response.body.renewsAt, '');
+      assert.equal(response.body.expiresAt, '');
+      assert.equal(response.body.deviceLimit, 'Unlimited');
+    }
+  );
+});
+
+test('cancelled subscription returns access end date instead of renewal date', async () => {
+  const cancelledLicense = {
+    ...ACTIVE_LICENSE,
+    attributes: {
+      ...ACTIVE_LICENSE.attributes,
+      metadata: {
+        customerEmail: 'customer@example.com',
+        productType: 'Annual',
+        accessStatus: 'active',
+        cancellationPending: 'true',
+        cancelAccessAt: '2027-06-05T00:00:00.000Z',
+        stripeCurrentPeriodEnd: '2027-06-05T00:00:00.000Z'
+      }
+    }
+  };
+
+  await withValidationServer(
+    async (url) => {
+      if (url.endsWith('/licenses/actions/validate-key')) {
+        return validationResponse({
+          valid: true,
+          code: 'VALID',
+          detail: 'License is valid.',
+          data: cancelledLicense
+        });
+      }
+      if (url.endsWith('/licenses/lic_123')) {
+        return new Response(JSON.stringify({ data: cancelledLicense }), { status: 200 });
+      }
+      if (url.endsWith('/machines?limit=100')) {
+        return new Response(JSON.stringify({ data: [] }), { status: 200 });
+      }
+      return new Response(JSON.stringify({ errors: [{ detail: 'Unexpected request.' }] }), {
+        status: 500
+      });
+    },
+    async (server) => {
+      const response = await postJson(server, '/api/license/validate', {
+        licenseKey: 'FORCEMAP-ANNUAL',
+        machineFingerprint: 'machine-fingerprint-123'
+      });
+
+      assert.equal(response.status, 200);
+      assert.equal(response.body.planName, 'Pro Annual');
+      assert.equal(response.body.renewsAt, '');
+      assert.equal(response.body.expiresAt, '2027-06-05T00:00:00.000Z');
+    }
+  );
+});
+
+test('suspended licence keeps the original failure behaviour', async () => {
+  const suspendedLicense = {
+    ...ACTIVE_LICENSE,
+    attributes: {
+      ...ACTIVE_LICENSE.attributes,
+      suspended: true,
+      metadata: {
+        customerName: 'Suspended Customer',
+        customerEmail: 'suspended@example.com'
+      }
+    }
+  };
+
+  await withValidationServer(
+    async (url) => {
+      if (url.endsWith('/licenses/actions/validate-key')) {
+        return validationResponse({
+          valid: true,
+          code: 'VALID',
+          detail: 'License is valid.',
+          data: suspendedLicense
+        });
+      }
+      return new Response(JSON.stringify({ errors: [{ detail: 'Unexpected request.' }] }), {
+        status: 500
+      });
+    },
+    async (server, requests) => {
+      const response = await postJson(server, '/api/license/validate', {
+        licenseKey: 'FORCEMAP-SUSPENDED',
+        machineFingerprint: 'machine-fingerprint-123'
+      });
+
+      assert.equal(response.status, 403);
+      assert.equal(response.body.allowed, false);
+      assert.equal(response.body.code, 'LICENSE_SUSPENDED');
+      assert.equal(response.body.detail, 'This ForceMap license is suspended.');
+      assert.equal(response.body.registeredName, undefined);
+      assert.equal(requests.length, 1);
     }
   );
 });

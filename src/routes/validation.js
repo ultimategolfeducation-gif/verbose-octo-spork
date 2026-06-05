@@ -1,6 +1,7 @@
 import express from 'express';
 import {
   activateMachine,
+  listMachinesForLicense,
   retrieveLicense,
   validateLicenseKey
 } from '../clients/keygenClient.js';
@@ -37,6 +38,105 @@ function validationFailurePayload(validation, license, fallbackDetail) {
 function hasExpectedPolicy(license) {
   const policyId = license?.relationships?.policy?.data?.id;
   return !policyId || policyId === getConfig().keygenPolicyId;
+}
+
+function metadataFor(license) {
+  return license?.attributes?.metadata || {};
+}
+
+function textValue(...values) {
+  for (const value of values) {
+    if (typeof value === 'string' && value.trim()) {
+      return value.trim();
+    }
+  }
+  return '';
+}
+
+function normalisePlanName(productType, license) {
+  const raw = textValue(productType);
+  const lower = raw.toLowerCase();
+  const policyName = textValue(
+    license?.relationships?.policy?.data?.attributes?.name,
+    license?.attributes?.policyName
+  ).toLowerCase();
+  const licenseName = textValue(license?.attributes?.name).toLowerCase();
+  const looksStaff =
+    lower === 'staff' ||
+    lower.includes('staff') ||
+    policyName.includes('staff') ||
+    licenseName.includes('staff');
+
+  if (looksStaff) {
+    return 'Pro Staff';
+  }
+  if (lower === 'monthly' || lower.includes('month')) {
+    return 'Pro Monthly';
+  }
+  if (lower === 'annual' || lower === 'yearly' || lower.includes('year')) {
+    return 'Pro Annual';
+  }
+  return raw ? `Pro ${raw}` : 'Pro';
+}
+
+function renewalFields(metadata) {
+  const productType = textValue(metadata.productType).toLowerCase();
+  const cancellationPending = String(metadata.cancellationPending || '').toLowerCase() === 'true';
+  const accessStatus = textValue(metadata.accessStatus).toLowerCase();
+  const currentPeriodEnd = textValue(metadata.stripeCurrentPeriodEnd);
+  const cancelAccessAt = textValue(metadata.cancelAccessAt);
+
+  if (productType.includes('staff')) {
+    return { renewsAt: '', expiresAt: '' };
+  }
+  if (cancellationPending || accessStatus === 'canceled' || accessStatus === 'cancelled') {
+    return {
+      renewsAt: '',
+      expiresAt: cancelAccessAt || currentPeriodEnd
+    };
+  }
+  return {
+    renewsAt: currentPeriodEnd,
+    expiresAt: ''
+  };
+}
+
+function deviceLimitFor(metadata, license) {
+  const explicit = textValue(
+    metadata.deviceLimit,
+    metadata.machineLimit,
+    metadata.activationLimit
+  );
+  if (explicit) {
+    return explicit;
+  }
+  if (textValue(metadata.productType).toLowerCase().includes('staff')) {
+    return 'Unlimited';
+  }
+  const maxMachines = license?.attributes?.maxMachines;
+  if (typeof maxMachines === 'number') {
+    return maxMachines === 0 ? 'Unlimited' : String(maxMachines);
+  }
+  return '';
+}
+
+async function licenseProfilePayload(license) {
+  const fullLicense = license?.id ? (await retrieveLicense(license.id)).data : license;
+  const metadata = metadataFor(fullLicense);
+  const { renewsAt, expiresAt } = renewalFields(metadata);
+  const machines = fullLicense?.id ? await listMachinesForLicense(fullLicense.id) : [];
+
+  return {
+    productName: 'ForceMap',
+    registeredName: textValue(metadata.customerName, fullLicense?.attributes?.name),
+    registeredEmail: textValue(metadata.customerEmail),
+    planName: normalisePlanName(metadata.productType, fullLicense),
+    renewsAt,
+    expiresAt,
+    deviceLimit: deviceLimitFor(metadata, fullLicense),
+    deviceCount: machines.length ? String(machines.length) : '',
+    billingUrl: ''
+  };
 }
 
 async function resolveActivationLicense(validation, licenseKey) {
@@ -131,13 +231,16 @@ validationRouter.post(
       );
     }
 
+    const profile = await licenseProfilePayload(license);
+
     res.json({
       allowed: true,
       code: validation.meta?.code || 'VALID',
       detail: validation.meta?.detail || 'License is valid.',
       licenseId: license?.id,
       status: license?.attributes?.status,
-      suspended
+      suspended,
+      ...profile
     });
   })
 );

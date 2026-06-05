@@ -29,6 +29,15 @@ function customerEmailFromSession(session, customer) {
   )?.toLowerCase();
 }
 
+export function customerNameFromSession(session, customer) {
+  return (
+    session.customer_details?.name ||
+    customer?.name ||
+    session.metadata?.name ||
+    ''
+  );
+}
+
 function subscriptionIdFromSession(session) {
   return typeof session.subscription === 'string'
     ? session.subscription
@@ -76,6 +85,7 @@ export async function provisionLicenseFromCheckout(session) {
 
   const metadata = {
     app: 'ForceMap',
+    customerName: customerNameFromSession(session, customer),
     customerEmail: email,
     productType,
     stripeCustomerId: customerId,
