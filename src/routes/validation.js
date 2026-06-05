@@ -5,6 +5,7 @@ import {
   retrieveLicense,
   validateLicenseKey
 } from '../clients/keygenClient.js';
+import { createBillingPortalSession } from '../clients/stripeClient.js';
 import { getConfig } from '../config.js';
 import { asyncHandler } from '../errors.js';
 
@@ -139,6 +140,33 @@ async function licenseProfilePayload(license) {
   };
 }
 
+async function validLicenseForBilling({ licenseKey, machineFingerprint }) {
+  const validation = await validateLicenseKey({
+    licenseKey,
+    fingerprint: machineFingerprint
+  });
+  const valid = Boolean(validation.meta?.valid);
+  const license = validation.data;
+  const suspended = Boolean(license?.attributes?.suspended);
+
+  if (!valid || suspended) {
+    return {
+      allowed: false,
+      license,
+      payload: validationFailurePayload(
+        validation,
+        license,
+        'This ForceMap license is not valid for this computer.'
+      )
+    };
+  }
+
+  return {
+    allowed: true,
+    license: license?.id ? (await retrieveLicense(license.id)).data : license
+  };
+}
+
 async function resolveActivationLicense(validation, licenseKey) {
   if (validation?.data?.id) {
     return validation.data;
@@ -241,6 +269,55 @@ validationRouter.post(
       status: license?.attributes?.status,
       suspended,
       ...profile
+    });
+  })
+);
+
+validationRouter.post(
+  '/billing-portal',
+  asyncHandler(async (req, res) => {
+    const { licenseKey, machineFingerprint } = req.body || {};
+
+    if (!licenseKey) {
+      return res.status(400).json({
+        ok: false,
+        code: 'LICENSE_KEY_REQUIRED',
+        detail: 'A license key is required.'
+      });
+    }
+
+    const billingLicense = await validLicenseForBilling({
+      licenseKey,
+      machineFingerprint
+    });
+
+    if (!billingLicense.allowed) {
+      return res.status(403).json({
+        ok: false,
+        ...billingLicense.payload
+      });
+    }
+
+    const metadata = metadataFor(billingLicense.license);
+    const stripeCustomerId = textValue(metadata.stripeCustomerId);
+    const productType = textValue(metadata.productType).toLowerCase();
+
+    if (!stripeCustomerId || productType.includes('staff')) {
+      return res.status(403).json({
+        ok: false,
+        code: 'BILLING_NOT_AVAILABLE',
+        detail: 'Billing management is not available for this ForceMap licence.'
+      });
+    }
+
+    const portalSession = await createBillingPortalSession({
+      customerId: stripeCustomerId,
+      returnUrl: getConfig().stripeBillingReturnUrl
+    });
+
+    res.json({
+      ok: true,
+      billingUrl: portalSession.url
     });
   })
 );

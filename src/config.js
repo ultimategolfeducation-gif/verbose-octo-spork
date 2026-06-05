@@ -21,6 +21,8 @@ export function getConfig() {
     nodeEnv: process.env.NODE_ENV || 'development',
     stripeSecretKey: process.env.STRIPE_SECRET_KEY,
     stripeWebhookSecret: process.env.STRIPE_WEBHOOK_SECRET,
+    stripeBillingReturnUrl:
+      process.env.STRIPE_BILLING_RETURN_URL || 'https://ultimategolfeducation.com',
     keygenAccountId: process.env.KEYGEN_ACCOUNT_ID,
     keygenProductId: process.env.KEYGEN_PRODUCT_ID,
     keygenPolicyId: process.env.KEYGEN_POLICY_ID,

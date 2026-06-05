@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import http from 'node:http';
 
 import { createApp } from '../src/app.js';
+import { setStripeClientForTests } from '../src/clients/stripeClient.js';
 
 const ACTIVE_LICENSE = {
   id: 'lic_123',
@@ -83,6 +84,7 @@ async function withValidationServer(fetchHandler, callback) {
     await callback(server, requests);
   } finally {
     await new Promise((resolve) => server.close(resolve));
+    setStripeClientForTests(null);
     globalThis.fetch = originalFetch;
     for (const [name, value] of Object.entries(originalEnv)) {
       if (value === undefined) {
@@ -482,6 +484,138 @@ test('suspended licence keeps the original failure behaviour', async () => {
       assert.equal(response.body.detail, 'This ForceMap license is suspended.');
       assert.equal(response.body.registeredName, undefined);
       assert.equal(requests.length, 1);
+    }
+  );
+});
+
+test('paid customer licence can create a Stripe billing portal session', async () => {
+  const paidLicense = {
+    ...ACTIVE_LICENSE,
+    attributes: {
+      ...ACTIVE_LICENSE.attributes,
+      metadata: {
+        customerEmail: 'markashtongolf@gmail.com',
+        productType: 'Monthly',
+        stripeCustomerId: 'cus_test_123'
+      }
+    }
+  };
+  const createdSessions = [];
+
+  await withValidationServer(
+    async (url) => {
+      if (url.endsWith('/licenses/actions/validate-key')) {
+        return validationResponse({
+          valid: true,
+          code: 'VALID',
+          detail: 'License is valid.',
+          data: paidLicense
+        });
+      }
+      if (url.endsWith('/licenses/lic_123')) {
+        return new Response(JSON.stringify({ data: paidLicense }), { status: 200 });
+      }
+      return new Response(JSON.stringify({ errors: [{ detail: 'Unexpected request.' }] }), {
+        status: 500
+      });
+    },
+    async (server) => {
+      setStripeClientForTests({
+        billingPortal: {
+          sessions: {
+            create: async (payload) => {
+              createdSessions.push(payload);
+              return { url: 'https://billing.stripe.com/session/test' };
+            }
+          }
+        }
+      });
+
+      const response = await postJson(server, '/api/license/billing-portal', {
+        licenseKey: 'FORCEMAP-MONTHLY',
+        machineFingerprint: 'machine-fingerprint-123'
+      });
+
+      assert.equal(response.status, 200);
+      assert.equal(response.body.ok, true);
+      assert.equal(response.body.billingUrl, 'https://billing.stripe.com/session/test');
+      assert.deepEqual(createdSessions, [
+        {
+          customer: 'cus_test_123',
+          return_url: 'https://ultimategolfeducation.com'
+        }
+      ]);
+    }
+  );
+});
+
+test('staff licence cannot create a Stripe billing portal session', async () => {
+  const staffLicense = {
+    ...ACTIVE_LICENSE,
+    attributes: {
+      ...ACTIVE_LICENSE.attributes,
+      metadata: {
+        customerName: 'Mark Ashton',
+        customerEmail: 'mark@ultimategolfeducation.com',
+        productType: 'Staff'
+      }
+    }
+  };
+
+  await withValidationServer(
+    async (url) => {
+      if (url.endsWith('/licenses/actions/validate-key')) {
+        return validationResponse({
+          valid: true,
+          code: 'VALID',
+          detail: 'License is valid.',
+          data: staffLicense
+        });
+      }
+      if (url.endsWith('/licenses/lic_123')) {
+        return new Response(JSON.stringify({ data: staffLicense }), { status: 200 });
+      }
+      return new Response(JSON.stringify({ errors: [{ detail: 'Unexpected request.' }] }), {
+        status: 500
+      });
+    },
+    async (server) => {
+      const response = await postJson(server, '/api/license/billing-portal', {
+        licenseKey: 'FORCEMAP-STAFF',
+        machineFingerprint: 'machine-fingerprint-123'
+      });
+
+      assert.equal(response.status, 403);
+      assert.equal(response.body.ok, false);
+      assert.equal(response.body.code, 'BILLING_NOT_AVAILABLE');
+    }
+  );
+});
+
+test('invalid licence cannot create a Stripe billing portal session', async () => {
+  await withValidationServer(
+    async (url) => {
+      if (url.endsWith('/licenses/actions/validate-key')) {
+        return validationResponse({
+          valid: false,
+          code: 'FINGERPRINT_SCOPE_MISMATCH',
+          detail: 'This license is not valid for this machine.',
+          data: ACTIVE_LICENSE
+        });
+      }
+      return new Response(JSON.stringify({ errors: [{ detail: 'Unexpected request.' }] }), {
+        status: 500
+      });
+    },
+    async (server) => {
+      const response = await postJson(server, '/api/license/billing-portal', {
+        licenseKey: 'FORCEMAP-MONTHLY',
+        machineFingerprint: 'machine-fingerprint-123'
+      });
+
+      assert.equal(response.status, 403);
+      assert.equal(response.body.ok, false);
+      assert.equal(response.body.code, 'FINGERPRINT_SCOPE_MISMATCH');
     }
   );
 });
