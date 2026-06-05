@@ -614,6 +614,63 @@ test('valid staff licence returns pro staff with no renewal or expiry', async ()
   );
 });
 
+test('valid staff licence falls back to licence name and unlimited devices', async () => {
+  const sparseStaffLicense = {
+    ...ACTIVE_LICENSE,
+    attributes: {
+      ...ACTIVE_LICENSE.attributes,
+      name: 'Mark Ashton Staff Licence',
+      metadata: {}
+    },
+    relationships: {
+      policy: {
+        data: {
+          id: 'staff_policy_123',
+          type: 'policies',
+          attributes: {
+            name: 'ForceMap Staff'
+          }
+        }
+      }
+    }
+  };
+
+  await withValidationServer(
+    async (url) => {
+      if (url.endsWith('/licenses/actions/validate-key')) {
+        return validationResponse({
+          valid: true,
+          code: 'VALID',
+          detail: 'License is valid.',
+          data: sparseStaffLicense
+        });
+      }
+      if (url.endsWith('/licenses/lic_123')) {
+        return new Response(JSON.stringify({ data: sparseStaffLicense }), { status: 200 });
+      }
+      if (url.endsWith('/machines?limit=100')) {
+        return new Response(JSON.stringify({ data: [] }), { status: 200 });
+      }
+      return new Response(JSON.stringify({ errors: [{ detail: 'Unexpected request.' }] }), {
+        status: 500
+      });
+    },
+    async (server) => {
+      const response = await postJson(server, '/api/license/validate', {
+        licenseKey: 'FORCEMAP-STAFF',
+        machineFingerprint: 'machine-fingerprint-123'
+      });
+
+      assert.equal(response.status, 200);
+      assert.equal(response.body.planName, 'Pro Staff');
+      assert.equal(response.body.registeredName, 'Mark Ashton');
+      assert.equal(response.body.renewsAt, '');
+      assert.equal(response.body.expiresAt, '');
+      assert.equal(response.body.deviceLimit, 'Unlimited');
+    }
+  );
+});
+
 test('cancelled subscription returns access end date instead of renewal date', async () => {
   const cancelledLicense = {
     ...ACTIVE_LICENSE,

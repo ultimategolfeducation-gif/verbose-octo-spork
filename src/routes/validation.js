@@ -84,6 +84,11 @@ function nameValue(...values) {
   return value.includes('@') ? '' : value;
 }
 
+function licenseNameValue(license) {
+  const value = nameValue(license?.attributes?.name);
+  return value.replace(/\s*-?\s*staff\s*(licen[cs]e)?\s*$/i, '').trim();
+}
+
 async function stripeCustomerProfile(metadata) {
   const stripeCustomerId = textValue(metadata.stripeCustomerId);
   if (!stripeCustomerId || (textValue(metadata.customerName) && textValue(metadata.customerEmail))) {
@@ -101,7 +106,7 @@ async function stripeCustomerProfile(metadata) {
   }
 }
 
-function normalisePlanName(productType, license) {
+function licenseLooksStaff(productType, license) {
   const raw = textValue(productType);
   const lower = raw.toLowerCase();
   const policyName = textValue(
@@ -109,13 +114,19 @@ function normalisePlanName(productType, license) {
     license?.attributes?.policyName
   ).toLowerCase();
   const licenseName = textValue(license?.attributes?.name).toLowerCase();
-  const looksStaff =
+  return (
     lower === 'staff' ||
     lower.includes('staff') ||
     policyName.includes('staff') ||
-    licenseName.includes('staff');
+    licenseName.includes('staff')
+  );
+}
 
-  if (looksStaff) {
+function normalisePlanName(productType, license) {
+  const raw = textValue(productType);
+  const lower = raw.toLowerCase();
+
+  if (licenseLooksStaff(raw, license)) {
     return 'Pro Staff';
   }
   if (lower === 'monthly' || lower.includes('month')) {
@@ -127,14 +138,14 @@ function normalisePlanName(productType, license) {
   return raw ? `Pro ${raw}` : 'Pro';
 }
 
-function renewalFields(metadata) {
+function renewalFields(metadata, license) {
   const productType = textValue(metadata.productType).toLowerCase();
   const cancellationPending = String(metadata.cancellationPending || '').toLowerCase() === 'true';
   const accessStatus = textValue(metadata.accessStatus).toLowerCase();
   const currentPeriodEnd = textValue(metadata.stripeCurrentPeriodEnd);
   const cancelAccessAt = textValue(metadata.cancelAccessAt);
 
-  if (productType.includes('staff')) {
+  if (licenseLooksStaff(productType, license)) {
     return { renewsAt: '', expiresAt: '' };
   }
   if (cancellationPending || accessStatus === 'canceled' || accessStatus === 'cancelled') {
@@ -158,7 +169,7 @@ function deviceLimitFor(metadata, license) {
   if (explicit) {
     return explicit;
   }
-  if (textValue(metadata.productType).toLowerCase().includes('staff')) {
+  if (licenseLooksStaff(metadata.productType, license)) {
     return 'Unlimited';
   }
   const maxMachines = license?.attributes?.maxMachines;
@@ -171,13 +182,13 @@ function deviceLimitFor(metadata, license) {
 async function licenseProfilePayload(license) {
   const fullLicense = license?.id ? (await retrieveLicense(license.id)).data : license;
   const metadata = metadataFor(fullLicense);
-  const { renewsAt, expiresAt } = renewalFields(metadata);
+  const { renewsAt, expiresAt } = renewalFields(metadata, fullLicense);
   const machines = fullLicense?.id ? await listMachinesForLicense(fullLicense.id) : [];
   const stripeCustomer = await stripeCustomerProfile(metadata);
 
   return {
     productName: 'ForceMap',
-    registeredName: nameValue(metadata.customerName, stripeCustomer.name),
+    registeredName: nameValue(metadata.customerName, stripeCustomer.name, licenseNameValue(fullLicense)),
     registeredEmail: textValue(metadata.customerEmail, stripeCustomer.email),
     planName: normalisePlanName(metadata.productType, fullLicense),
     renewsAt,
