@@ -128,7 +128,7 @@ async function licenseProfilePayload(license) {
 
   return {
     productName: 'ForceMap',
-    registeredName: textValue(metadata.customerName, fullLicense?.attributes?.name),
+    registeredName: textValue(metadata.customerName),
     registeredEmail: textValue(metadata.customerEmail),
     planName: normalisePlanName(metadata.productType, fullLicense),
     renewsAt,
