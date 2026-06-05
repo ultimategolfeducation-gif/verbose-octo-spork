@@ -5,7 +5,10 @@ import {
   retrieveLicense,
   validateLicenseKey
 } from '../clients/keygenClient.js';
-import { createBillingPortalSession } from '../clients/stripeClient.js';
+import {
+  createBillingPortalSession,
+  retrieveCustomer
+} from '../clients/stripeClient.js';
 import { getConfig } from '../config.js';
 import { asyncHandler } from '../errors.js';
 
@@ -52,6 +55,28 @@ function textValue(...values) {
     }
   }
   return '';
+}
+
+function nameValue(...values) {
+  const value = textValue(...values);
+  return value.includes('@') ? '' : value;
+}
+
+async function stripeCustomerProfile(metadata) {
+  const stripeCustomerId = textValue(metadata.stripeCustomerId);
+  if (!stripeCustomerId || (textValue(metadata.customerName) && textValue(metadata.customerEmail))) {
+    return { name: '', email: '' };
+  }
+
+  try {
+    const customer = await retrieveCustomer(stripeCustomerId);
+    return {
+      name: nameValue(customer?.name),
+      email: textValue(customer?.email)
+    };
+  } catch (_error) {
+    return { name: '', email: '' };
+  }
 }
 
 function normalisePlanName(productType, license) {
@@ -126,11 +151,12 @@ async function licenseProfilePayload(license) {
   const metadata = metadataFor(fullLicense);
   const { renewsAt, expiresAt } = renewalFields(metadata);
   const machines = fullLicense?.id ? await listMachinesForLicense(fullLicense.id) : [];
+  const stripeCustomer = await stripeCustomerProfile(metadata);
 
   return {
     productName: 'ForceMap',
-    registeredName: textValue(metadata.customerName),
-    registeredEmail: textValue(metadata.customerEmail),
+    registeredName: nameValue(metadata.customerName, stripeCustomer.name),
+    registeredEmail: textValue(metadata.customerEmail, stripeCustomer.email),
     planName: normalisePlanName(metadata.productType, fullLicense),
     renewsAt,
     expiresAt,

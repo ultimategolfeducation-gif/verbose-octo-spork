@@ -344,6 +344,65 @@ test('validation does not use a Keygen email name as registered customer name', 
   );
 });
 
+test('validation falls back to Stripe customer name for older paid licences', async () => {
+  const olderPaidLicense = {
+    ...ACTIVE_LICENSE,
+    attributes: {
+      ...ACTIVE_LICENSE.attributes,
+      metadata: {
+        customerEmail: 'markashtongolf@gmail.com',
+        productType: 'Monthly',
+        stripeCustomerId: 'cus_test_123',
+        stripeCurrentPeriodEnd: '2026-07-05T00:00:00.000Z',
+        accessStatus: 'active',
+        cancellationPending: 'false'
+      }
+    }
+  };
+
+  await withValidationServer(
+    async (url) => {
+      if (url.endsWith('/licenses/actions/validate-key')) {
+        return validationResponse({
+          valid: true,
+          code: 'VALID',
+          detail: 'License is valid.',
+          data: olderPaidLicense
+        });
+      }
+      if (url.endsWith('/licenses/lic_123')) {
+        return new Response(JSON.stringify({ data: olderPaidLicense }), { status: 200 });
+      }
+      if (url.endsWith('/machines?limit=100')) {
+        return new Response(JSON.stringify({ data: [] }), { status: 200 });
+      }
+      return new Response(JSON.stringify({ errors: [{ detail: 'Unexpected request.' }] }), {
+        status: 500
+      });
+    },
+    async (server) => {
+      setStripeClientForTests({
+        customers: {
+          retrieve: async (customerId) => ({
+            id: customerId,
+            name: 'Mark Ashton Golf (TEST)',
+            email: 'markashtongolf@gmail.com'
+          })
+        }
+      });
+
+      const response = await postJson(server, '/api/license/validate', {
+        licenseKey: 'FORCEMAP-MONTHLY',
+        machineFingerprint: 'machine-fingerprint-123'
+      });
+
+      assert.equal(response.status, 200);
+      assert.equal(response.body.registeredName, 'Mark Ashton Golf (TEST)');
+      assert.equal(response.body.registeredEmail, 'markashtongolf@gmail.com');
+    }
+  );
+});
+
 test('valid staff licence returns pro staff with no renewal or expiry', async () => {
   const staffLicense = {
     ...ACTIVE_LICENSE,
