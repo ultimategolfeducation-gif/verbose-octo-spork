@@ -245,6 +245,20 @@ Recommended desktop behavior:
 - Keep a short local cache only for temporary internet outages.
 - Do not embed the Keygen admin API token in the desktop app.
 
+## Production Security Checklist
+
+- Secrets stay in Railway environment variables only. Do not commit `.env` or paste live token values into docs, packages, logs, handoffs, or support reports.
+- Public JSON endpoints reject unexpected fields and enforce type, length, and allowed-value checks before calling Stripe, Keygen, MailerSend, or admin workflows.
+- `/api/license/validate` is protected by per-IP and per-licence-key rate limits.
+- `/api/license/billing-portal`, `/admin`, and `/webhooks/stripe` have separate rate limits.
+- Stripe webhooks use signature verification against the raw request body.
+- Duplicate checkout events are idempotent because licences are looked up by `stripeSubscriptionId` before creation.
+- Payment/subscription/access status is sourced from Stripe and Keygen, never from the desktop app.
+- Security logs use event codes and masked hashes. Do not log full licence keys, tokens, card/payment details, webhook payloads, or sensitive customer data.
+- The desktop app may use saved validation during temporary service outages, but offline grace must not extend past a cancelled/expired access end date.
+- TODO: Configure live alerting for Railway usage spikes, repeated rate-limit events, webhook failures, and failed licence validation bursts.
+- TODO: Consider Cloudflare/WAF protection for `license.ultimategolfeducation.com` once DNS/proxy ownership is ready.
+
 ## Admin Endpoints
 
 Every admin endpoint requires:

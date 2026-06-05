@@ -169,6 +169,95 @@ test('first-time licence activation handles an unactivated fingerprint response'
   );
 });
 
+test('licence validation rejects unexpected public fields before Keygen is called', async () => {
+  await withValidationServer(
+    async () => {
+      throw new Error('Keygen should not be called for invalid payloads.');
+    },
+    async (server, requests) => {
+      const response = await postJson(server, '/api/license/validate', {
+        licenseKey: 'FORCEMAP-MONTHLY',
+        machineFingerprint: 'machine-fingerprint-123',
+        role: 'admin'
+      });
+
+      assert.equal(response.status, 400);
+      assert.equal(response.body.error, 'Unexpected field: role');
+      assert.equal(requests.length, 0);
+    }
+  );
+});
+
+test('licence validation enforces public field types before Keygen is called', async () => {
+  await withValidationServer(
+    async () => {
+      throw new Error('Keygen should not be called for invalid payloads.');
+    },
+    async (server, requests) => {
+      const response = await postJson(server, '/api/license/validate', {
+        licenseKey: 'FORCEMAP-MONTHLY',
+        machineFingerprint: 'machine-fingerprint-123',
+        activate: 'true'
+      });
+
+      assert.equal(response.status, 400);
+      assert.equal(response.body.error, 'activate must be true or false.');
+      assert.equal(requests.length, 0);
+    }
+  );
+});
+
+test('billing portal rejects unexpected public fields before Keygen is called', async () => {
+  await withValidationServer(
+    async () => {
+      throw new Error('Keygen should not be called for invalid payloads.');
+    },
+    async (server, requests) => {
+      const response = await postJson(server, '/api/license/billing-portal', {
+        licenseKey: 'FORCEMAP-MONTHLY',
+        machineFingerprint: 'machine-fingerprint-123',
+        admin: true
+      });
+
+      assert.equal(response.status, 400);
+      assert.equal(response.body.error, 'Unexpected field: admin');
+      assert.equal(requests.length, 0);
+    }
+  );
+});
+
+test('server errors do not expose upstream response details to clients', async () => {
+  await withValidationServer(
+    async (url) => {
+      if (url.endsWith('/licenses/actions/validate-key')) {
+        return new Response(
+          JSON.stringify({
+            errors: [
+              {
+                title: 'Upstream failed',
+                detail: 'internal upstream detail'
+              }
+            ]
+          }),
+          { status: 500 }
+        );
+      }
+      return new Response(JSON.stringify({ errors: [{ detail: 'Unexpected request.' }] }), {
+        status: 500
+      });
+    },
+    async (server) => {
+      const response = await postJson(server, '/api/license/validate', {
+        licenseKey: 'FORCEMAP-MONTHLY',
+        machineFingerprint: 'machine-fingerprint-123'
+      });
+
+      assert.equal(response.status, 500);
+      assert.deepEqual(response.body, { error: 'Unexpected server error.' });
+    }
+  );
+});
+
 test('first-time licence activation retrieves a real licence after a generic invalid response', async () => {
   await withValidationServer(
     async (url, _options, _payload, requests) => {

@@ -1,6 +1,7 @@
 import { createApp } from './app.js';
 import { assertRequiredEnv, getConfig } from './config.js';
 import { processDueLicenseActions } from './licenseWorkflow.js';
+import { errorSummary } from './securityAudit.js';
 
 assertRequiredEnv();
 
@@ -14,6 +15,6 @@ app.listen(config.port, host, () => {
 
 setInterval(() => {
   processDueLicenseActions().catch((error) => {
-    console.error('Scheduled due-action processing failed.', error);
+    console.error('[security] scheduled_due_actions_failed', JSON.stringify(errorSummary(error)));
   });
 }, 60 * 60 * 1000);

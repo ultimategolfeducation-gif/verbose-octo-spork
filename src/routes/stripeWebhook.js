@@ -1,6 +1,7 @@
 import express from 'express';
 import { stripe } from '../clients/stripeClient.js';
 import { getConfig } from '../config.js';
+import { auditEvent, errorSummary } from '../securityAudit.js';
 import {
   applySubscriptionState,
   handlePaymentFailed,
@@ -20,6 +21,7 @@ stripeWebhookRouter.post(
         signature,
         getConfig().stripeWebhookSecret
       );
+      auditEvent(req, 'stripe_webhook_received', { type: event.type });
 
       switch (event.type) {
         case 'checkout.session.completed':
@@ -39,6 +41,7 @@ stripeWebhookRouter.post(
 
       res.json({ received: true });
     } catch (error) {
+      auditEvent(req, 'stripe_webhook_failed', errorSummary(error));
       next(error);
     }
   }

@@ -11,6 +11,12 @@ import {
 } from '../clients/stripeClient.js';
 import { getConfig } from '../config.js';
 import { asyncHandler } from '../errors.js';
+import {
+  billingPortalSchema,
+  licenseValidationSchema,
+  validatePayload
+} from '../requestValidation.js';
+import { auditEvent, licenseHash } from '../securityAudit.js';
 
 export const validationRouter = express.Router();
 
@@ -210,18 +216,10 @@ validationRouter.post(
     const {
       licenseKey,
       machineFingerprint,
-      machineName = 'ForceMap Windows device',
-      platform = 'Windows',
-      activate = true
-    } = req.body || {};
-
-    if (!licenseKey) {
-      return res.status(400).json({
-        allowed: false,
-        code: 'LICENSE_KEY_REQUIRED',
-        detail: 'A license key is required.'
-      });
-    }
+      machineName,
+      platform,
+      activate
+    } = validatePayload(req.body || {}, licenseValidationSchema);
 
     let validation = await validateLicenseKey({
       licenseKey,
@@ -240,19 +238,27 @@ validationRouter.post(
         (isFirstActivationFailure(validation) || !validation.meta?.code);
 
       if (shouldActivate) {
+        auditEvent(req, 'license_activation_attempt', {
+          license: licenseHash(licenseKey),
+          licenseId: activationLicense.id
+        });
         try {
           await activateMachine({
             licenseId: activationLicense.id,
             licenseKey,
             fingerprint: machineFingerprint,
-            name: machineName,
-            platform
+            name: machineName || 'ForceMap Windows device',
+            platform: platform || 'Windows'
           });
         } catch (error) {
           const status = error.statusCode;
           if (status === 409) {
             // Already activated for this machine. Confirm below with fingerprint validation.
           } else if (status === 422) {
+            auditEvent(req, 'license_activation_limit', {
+              license: licenseHash(licenseKey),
+              licenseId: activationLicense.id
+            });
             return res.status(403).json({
               allowed: false,
               code: 'LICENSE_ACTIVATION_LIMIT',
@@ -276,6 +282,10 @@ validationRouter.post(
     }
 
     if (!valid || suspended) {
+      auditEvent(req, 'license_validation_failed', {
+        license: licenseHash(licenseKey),
+        code: suspended ? 'LICENSE_SUSPENDED' : validation.meta?.code || 'LICENSE_INVALID'
+      });
       return res.status(403).json(
         validationFailurePayload(
           validation,
@@ -302,15 +312,10 @@ validationRouter.post(
 validationRouter.post(
   '/billing-portal',
   asyncHandler(async (req, res) => {
-    const { licenseKey, machineFingerprint } = req.body || {};
-
-    if (!licenseKey) {
-      return res.status(400).json({
-        ok: false,
-        code: 'LICENSE_KEY_REQUIRED',
-        detail: 'A license key is required.'
-      });
-    }
+    const { licenseKey, machineFingerprint } = validatePayload(
+      req.body || {},
+      billingPortalSchema
+    );
 
     const billingLicense = await validLicenseForBilling({
       licenseKey,
@@ -318,6 +323,10 @@ validationRouter.post(
     });
 
     if (!billingLicense.allowed) {
+      auditEvent(req, 'billing_portal_validation_failed', {
+        license: licenseHash(licenseKey),
+        code: billingLicense.payload.code
+      });
       return res.status(403).json({
         ok: false,
         ...billingLicense.payload
@@ -329,6 +338,10 @@ validationRouter.post(
     const productType = textValue(metadata.productType).toLowerCase();
 
     if (!stripeCustomerId || productType.includes('staff')) {
+      auditEvent(req, 'billing_portal_unavailable', {
+        license: licenseHash(licenseKey),
+        productType: productType || 'unknown'
+      });
       return res.status(403).json({
         ok: false,
         code: 'BILLING_NOT_AVAILABLE',
@@ -339,6 +352,10 @@ validationRouter.post(
     const portalSession = await createBillingPortalSession({
       customerId: stripeCustomerId,
       returnUrl: getConfig().stripeBillingReturnUrl
+    });
+
+    auditEvent(req, 'billing_portal_created', {
+      license: licenseHash(licenseKey)
     });
 
     res.json({

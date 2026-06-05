@@ -1,5 +1,6 @@
 import rateLimit from 'express-rate-limit';
 import { createHash } from 'node:crypto';
+import { auditEvent } from './securityAudit.js';
 
 function jsonRateLimit({ windowMs, limit, code = 'RATE_LIMITED', message, keyGenerator, skip }) {
   return rateLimit({
@@ -9,7 +10,8 @@ function jsonRateLimit({ windowMs, limit, code = 'RATE_LIMITED', message, keyGen
     skip,
     standardHeaders: true,
     legacyHeaders: false,
-    handler: (_req, res) => {
+    handler: (req, res) => {
+      auditEvent(req, 'rate_limited', { code });
       res.status(429).json({
         ok: false,
         allowed: false,

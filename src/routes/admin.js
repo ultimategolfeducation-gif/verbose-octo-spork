@@ -11,6 +11,8 @@ import {
 import { retrieveSubscription } from '../clients/stripeClient.js';
 import { sendWelcomeEmail } from '../email.js';
 import { processDueLicenseActions } from '../licenseWorkflow.js';
+import { customerIdentifierSchema, validatePayload, validateQuery } from '../requestValidation.js';
+import { auditEvent, customerHash } from '../securityAudit.js';
 import { getProductTypeFromSubscription, secondsToIso } from '../subscriptionPolicy.js';
 import { asyncHandler } from '../errors.js';
 
@@ -27,17 +29,18 @@ adminRouter.post(
 adminRouter.use(requireAdmin);
 
 async function findLicenseFromBody(body) {
-  return findLicenseByAnyIdentifier({
-    licenseId: body.licenseId,
-    subscriptionId: body.subscriptionId,
-    email: body.email
-  });
+  const identifiers = validatePayload(body || {}, customerIdentifierSchema);
+  return findLicenseByAnyIdentifier(identifiers);
 }
 
 adminRouter.post(
   '/resend-welcome',
   asyncHandler(async (req, res) => {
     const license = await findLicenseFromBody(req.body || {});
+    auditEvent(req, 'admin_resend_welcome', {
+      customer: customerHash(license.attributes.metadata.customerEmail),
+      licenseId: license.id
+    });
     await sendWelcomeEmail({
       email: license.attributes.metadata.customerEmail,
       licenseKey: license.attributes.key
@@ -55,6 +58,10 @@ adminRouter.post(
     const oldLicense = await findLicenseFromBody(req.body || {});
     const metadata = oldLicense.attributes.metadata || {};
     const email = metadata.customerEmail;
+    auditEvent(req, 'admin_reissue_license', {
+      customer: customerHash(email),
+      licenseId: oldLicense.id
+    });
     const subscription = metadata.stripeSubscriptionId
       ? await retrieveSubscription(metadata.stripeSubscriptionId)
       : null;
@@ -98,6 +105,10 @@ adminRouter.post(
   '/suspend-license',
   asyncHandler(async (req, res) => {
     const license = await findLicenseFromBody(req.body || {});
+    auditEvent(req, 'admin_suspend_license', {
+      customer: customerHash(license.attributes.metadata?.customerEmail),
+      licenseId: license.id
+    });
     await suspendLicense(license.id);
     await updateLicenseMetadata(license, {
       accessStatus: 'suspended',
@@ -111,6 +122,10 @@ adminRouter.post(
   '/reactivate-license',
   asyncHandler(async (req, res) => {
     const license = await findLicenseFromBody(req.body || {});
+    auditEvent(req, 'admin_reactivate_license', {
+      customer: customerHash(license.attributes.metadata?.customerEmail),
+      licenseId: license.id
+    });
     await reinstateLicense(license.id);
     await updateLicenseMetadata(license, {
       accessStatus: 'active',
@@ -124,6 +139,10 @@ adminRouter.post(
   '/reset-activations',
   asyncHandler(async (req, res) => {
     const license = await findLicenseFromBody(req.body || {});
+    auditEvent(req, 'admin_reset_activations', {
+      customer: customerHash(license.attributes.metadata?.customerEmail),
+      licenseId: license.id
+    });
     const result = await resetMachinesForLicense(license.id);
     await updateLicenseMetadata(license, {
       activationsResetAt: new Date().toISOString()
@@ -135,11 +154,8 @@ adminRouter.post(
 adminRouter.get(
   '/customer-status',
   asyncHandler(async (req, res) => {
-    const license = await findLicenseByAnyIdentifier({
-      licenseId: req.query.licenseId,
-      subscriptionId: req.query.subscriptionId,
-      email: req.query.email
-    });
+    const identifiers = validateQuery(req.query || {}, customerIdentifierSchema);
+    const license = await findLicenseByAnyIdentifier(identifiers);
     const subscriptionId = license.attributes.metadata?.stripeSubscriptionId;
     const subscription = subscriptionId ? await retrieveSubscription(subscriptionId) : null;
 
