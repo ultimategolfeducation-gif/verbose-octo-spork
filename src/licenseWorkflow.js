@@ -405,7 +405,9 @@ export async function processDueLicenseActions(now = new Date()) {
     }
 
     if (suspendDue) {
-      await suspendLicense(license.id);
+      if (!license.attributes?.suspended) {
+        await suspendLicense(license.id);
+      }
       if (email && !metadata.paymentSuspendedEmailSentAt) {
         await sendSuspendedEmail({ email });
       }
@@ -427,7 +429,9 @@ export async function processDueLicenseActions(now = new Date()) {
       continue;
     }
 
-    await suspendLicense(license.id);
+    if (!license.attributes?.suspended) {
+      await suspendLicense(license.id);
+    }
     await updateLicenseMetadata(license, {
       accessStatus: 'suspended',
       cancellationPending: 'false'

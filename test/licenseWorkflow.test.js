@@ -6,7 +6,8 @@ import {
   applySubscriptionState,
   customerNameFromSession,
   handleChargeRefunded,
-  handlePaymentActionRequired
+  handlePaymentActionRequired,
+  processDueLicenseActions
 } from '../src/licenseWorkflow.js';
 
 test('customerNameFromSession prefers checkout customer details', () => {
@@ -136,6 +137,73 @@ test('active scheduled cancellation does not reinstate an already active licence
     );
     assert.equal(
       requests.some((request) => request.url.endsWith('/actions/reinstate')),
+      false
+    );
+  } finally {
+    globalThis.fetch = originalFetch;
+    for (const [name, value] of Object.entries(originalEnv)) {
+      if (value === undefined) {
+        delete process.env[name];
+      } else {
+        process.env[name] = value;
+      }
+    }
+  }
+});
+
+test('due-action retries do not resuspend an already suspended cancelled licence', async () => {
+  const originalFetch = globalThis.fetch;
+  const originalEnv = {
+    KEYGEN_ACCOUNT_ID: process.env.KEYGEN_ACCOUNT_ID,
+    KEYGEN_API_TOKEN: process.env.KEYGEN_API_TOKEN
+  };
+  const license = {
+    ...testLicense({
+      cancellationPending: 'true',
+      cancelAccessAt: '2026-07-23T00:00:00.000Z'
+    }),
+    id: 'lic_cancelled'
+  };
+  license.attributes.suspended = true;
+  const requests = [];
+
+  process.env.KEYGEN_ACCOUNT_ID = 'keygen-account';
+  process.env.KEYGEN_API_TOKEN = 'keygen-token';
+
+  globalThis.fetch = async (url, options = {}) => {
+    requests.push({ url: String(url), options });
+
+    if (String(url).includes('/licenses?') && String(url).includes('paymentFailureOpen')) {
+      return keygenBody({ data: [] });
+    }
+    if (String(url).includes('/licenses?') && String(url).includes('cancellationPending')) {
+      return keygenBody({ data: [license] });
+    }
+    if (String(url).endsWith('/licenses/lic_cancelled')) {
+      const body = JSON.parse(options.body);
+      return keygenBody({
+        data: {
+          ...license,
+          attributes: {
+            ...license.attributes,
+            metadata: body.data.attributes.metadata
+          }
+        }
+      });
+    }
+    throw new Error(`Unexpected request: ${url}`);
+  };
+
+  try {
+    const result = await processDueLicenseActions(new Date('2026-07-24T00:00:00.000Z'));
+
+    assert.deepEqual(result, {
+      remindersSent: 0,
+      paymentSuspensions: 0,
+      cancellationSuspensions: 1
+    });
+    assert.equal(
+      requests.some((request) => request.url.endsWith('/actions/suspend')),
       false
     );
   } finally {
