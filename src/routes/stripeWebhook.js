@@ -4,7 +4,10 @@ import { getConfig } from '../config.js';
 import { auditEvent, errorSummary } from '../securityAudit.js';
 import {
   applySubscriptionState,
+  handleChargeRefunded,
+  handlePaymentActionRequired,
   handlePaymentFailed,
+  handlePaymentSucceeded,
   provisionLicenseFromCheckout
 } from '../licenseWorkflow.js';
 
@@ -30,10 +33,23 @@ stripeWebhookRouter.post(
         case 'customer.subscription.created':
         case 'customer.subscription.updated':
         case 'customer.subscription.deleted':
-          await applySubscriptionState(event.data.object, event.type);
+        case 'customer.subscription.paused':
+        case 'customer.subscription.resumed':
+        case 'customer.subscription.pending_update_applied':
+        case 'customer.subscription.pending_update_expired':
+          await applySubscriptionState(event.data.object, event.type, event.id);
           break;
         case 'invoice.payment_failed':
-          await handlePaymentFailed(event.data.object);
+          await handlePaymentFailed(event.data.object, event.id);
+          break;
+        case 'invoice.payment_action_required':
+          await handlePaymentActionRequired(event.data.object, event.id);
+          break;
+        case 'invoice.payment_succeeded':
+          await handlePaymentSucceeded(event.data.object, event.id);
+          break;
+        case 'charge.refunded':
+          await handleChargeRefunded(event.data.object, event.id);
           break;
         default:
           break;

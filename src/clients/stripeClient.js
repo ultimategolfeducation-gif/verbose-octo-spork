@@ -28,6 +28,12 @@ export async function retrieveCustomer(customerId) {
   return stripe().customers.retrieve(customerId);
 }
 
+export async function retrieveInvoice(invoiceId) {
+  return stripe().invoices.retrieve(invoiceId, {
+    expand: ['subscription']
+  });
+}
+
 export async function createBillingPortalSession({ customerId, returnUrl }) {
   return stripe().billingPortal.sessions.create({
     customer: customerId,

@@ -1,6 +1,6 @@
 # ForceMap Licensing Backend
 
-This folder contains the small Stripe to Keygen licensing backend for **ForceMap by Ultimate Golf Education**.
+This folder contains the small Stripe to Keygen licensing backend for **ForceMap™ by Ultimate Golf Education**.
 
 It is intentionally separate from the current desktop capture app. The old internal `V1ProScraper` storage paths and OCR workflow are not changed by this backend.
 
@@ -59,12 +59,13 @@ KEYGEN_API_TOKEN=
 
 MAILERSEND_API_TOKEN=
 MAILERSEND_FROM_EMAIL=software@ultimategolfeducation.com
-MAILERSEND_FROM_NAME=ForceMap by Ultimate Golf Education
+MAILERSEND_FROM_NAME=ForceMap™ by Ultimate Golf Education
 MAILERSEND_REPLY_TO_EMAIL=info@ultimategolfeducation.com
 MAILERSEND_REPLY_TO_NAME=Ultimate Golf Education
+APP_BILLING_EMAILS_ENABLED=false
 ABUSE_ALERT_EMAIL=info@ultimategolfeducation.com
 
-DOWNLOAD_URL=https://learn.ultimategolfeducation.com/forcemap-download
+DOWNLOAD_URL=https://info.forcemap.com.au/forcemap-download
 ADMIN_API_TOKEN=
 TASK_API_TOKEN=
 ```
@@ -88,7 +89,14 @@ checkout.session.completed
 customer.subscription.created
 customer.subscription.updated
 customer.subscription.deleted
+customer.subscription.paused
+customer.subscription.resumed
+customer.subscription.pending_update_applied
+customer.subscription.pending_update_expired
 invoice.payment_failed
+invoice.payment_action_required
+invoice.payment_succeeded
+charge.refunded
 ```
 
 5. Copy the webhook signing secret into `STRIPE_WEBHOOK_SECRET`.
@@ -128,28 +136,35 @@ Use MailerSend's Email API for transactional emails. Create a MailerSend API tok
 ```text
 MAILERSEND_API_TOKEN=
 MAILERSEND_FROM_EMAIL=software@ultimategolfeducation.com
-MAILERSEND_FROM_NAME=ForceMap by Ultimate Golf Education
+MAILERSEND_FROM_NAME=ForceMap™ by Ultimate Golf Education
 MAILERSEND_REPLY_TO_EMAIL=info@ultimategolfeducation.com
 MAILERSEND_REPLY_TO_NAME=Ultimate Golf Education
+APP_BILLING_EMAILS_ENABLED=false
 ABUSE_ALERT_EMAIL=info@ultimategolfeducation.com
 ```
 
-The welcome email sends:
+Keep `APP_BILLING_EMAILS_ENABLED=false` when Stripe owns receipts, failed-payment recovery, renewal, card-expiry, trial-ending, and billing cancellation emails. Set it to `true` only as a temporary fallback if Stripe customer emails are not configured yet.
+
+The backend sends ForceMap access emails through MailerSend. The welcome/licence email sends:
 
 ```text
-Subject: Welcome to ForceMap by Ultimate Golf Education
+Subject: Welcome to ForceMap™ by Ultimate Golf Education
 
-Thank you for subscribing to ForceMap by Ultimate Golf Education.
+Welcome to ForceMap™ by Ultimate Golf Education.
 
-Download:
+Your ForceMap licence is ready. Download the installer here:
 {DOWNLOAD_URL}
 
-License Key:
+Licence key:
 {LICENSE_KEY}
 
-Support:
+Regards,
+Ultimate Golf Education
+ForceMap™ software support
 info@ultimategolfeducation.com
 ```
+
+See `docs/subscription-email-flow.md` for the full Stripe versus MailerSend ownership table, Stripe dashboard settings, MailerSend paid-account checks, live verification notes, and test plan.
 
 ## Railway Deployment
 
@@ -192,7 +207,7 @@ POST https://YOUR-RAILWAY-APP.up.railway.app/admin/tasks/process-due-actions
 Authorization: Bearer TASK_API_TOKEN
 ```
 
-This sends 24-hour payment reminders, suspends after 48 hours unpaid, and suspends cancelled subscriptions when the paid period has ended.
+This suspends after 48 hours unpaid and suspends cancelled subscriptions when the paid period has ended. It sends 24-hour payment reminders only when `APP_BILLING_EMAILS_ENABLED=true`; leave that off when Stripe owns billing emails.
 
 ## ForceMap Desktop Validation Endpoint
 

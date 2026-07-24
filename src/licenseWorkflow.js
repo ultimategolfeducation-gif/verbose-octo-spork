@@ -5,7 +5,8 @@ import {
   suspendLicense,
   updateLicenseMetadata
 } from './clients/keygenClient.js';
-import { retrieveCustomer, retrieveSubscription } from './clients/stripeClient.js';
+import { retrieveCustomer, retrieveInvoice, retrieveSubscription } from './clients/stripeClient.js';
+import { getConfig } from './config.js';
 import {
   buildFailureWindow,
   getProductTypeFromSubscription,
@@ -13,6 +14,7 @@ import {
   subscriptionAccessPatch
 } from './subscriptionPolicy.js';
 import {
+  sendAccessRestoredEmail,
   sendCancellationEmail,
   sendPaymentFailedEmail,
   sendPaymentReminderEmail,
@@ -46,6 +48,20 @@ function subscriptionIdFromSession(session) {
 
 function customerIdFromSession(session) {
   return typeof session.customer === 'string' ? session.customer : session.customer?.id;
+}
+
+function billingEmailsEnabled() {
+  return getConfig().appBillingEmailsEnabled;
+}
+
+function subscriptionIdFromInvoice(invoice) {
+  return typeof invoice.subscription === 'string'
+    ? invoice.subscription
+    : invoice.subscription?.id;
+}
+
+function invoiceIdFromCharge(charge) {
+  return typeof charge.invoice === 'string' ? charge.invoice : charge.invoice?.id;
 }
 
 export async function provisionLicenseFromCheckout(session) {
@@ -122,7 +138,7 @@ export async function provisionLicenseFromCheckout(session) {
   return { license, created: true };
 }
 
-export async function applySubscriptionState(subscription, eventType) {
+export async function applySubscriptionState(subscription, eventType, eventId = '') {
   const license = await findLicenseByMetadata('stripeSubscriptionId', subscription.id);
   if (!license) {
     return { found: false };
@@ -147,14 +163,16 @@ export async function applySubscriptionState(subscription, eventType) {
   }
 
   if (subscription.cancel_at_period_end && email) {
-    const existingCancelAt = metadata.cancelAccessAt;
     const accessEndsAt = secondsToIso(subscription.current_period_end);
-    if (existingCancelAt !== accessEndsAt) {
+    if (metadata.cancellationEmailSentForAccessEndsAt !== accessEndsAt) {
       await sendCancellationEmail({ email, accessEndsAt });
+      patch.cancellationEmailSentForAccessEndsAt = accessEndsAt;
+      patch.cancellationEmailSentAt = new Date().toISOString();
     }
   }
 
   if (
+    billingEmailsEnabled() &&
     subscription.status === 'past_due' &&
     email &&
     !metadata.paymentPastDueEmailSentAt
@@ -165,15 +183,15 @@ export async function applySubscriptionState(subscription, eventType) {
 
   const updated = await updateLicenseMetadata(license, {
     ...patch,
-    lastStripeEventType: eventType
+    lastStripeEventType: eventType,
+    lastStripeEventId: eventId
   });
 
   return { found: true, license: updated.data };
 }
 
-export async function handlePaymentFailed(invoice) {
-  const subscriptionId =
-    typeof invoice.subscription === 'string' ? invoice.subscription : invoice.subscription?.id;
+export async function handlePaymentFailed(invoice, eventId = '') {
+  const subscriptionId = subscriptionIdFromInvoice(invoice);
   if (!subscriptionId) {
     return { found: false };
   }
@@ -186,6 +204,7 @@ export async function handlePaymentFailed(invoice) {
   const metadata = license.attributes?.metadata || {};
   const email = metadata.customerEmail;
   const now = new Date();
+  const sendAppBillingEmail = billingEmailsEnabled();
   const failureWindow =
     metadata.paymentFailureOpen === 'true'
       ? {
@@ -196,7 +215,7 @@ export async function handlePaymentFailed(invoice) {
         }
       : buildFailureWindow(now);
 
-  if (email && !metadata.paymentFailedEmailSentAt) {
+  if (sendAppBillingEmail && email && !metadata.paymentFailedEmailSentAt) {
     await sendPaymentFailedEmail({ email });
   }
 
@@ -206,7 +225,139 @@ export async function handlePaymentFailed(invoice) {
     ...failureWindow,
     accessStatus: 'grace_period',
     lastStripeEventType: 'invoice.payment_failed',
-    paymentFailedEmailSentAt: metadata.paymentFailedEmailSentAt || now.toISOString()
+    lastStripeEventId: eventId,
+    lastPaymentFailedInvoiceId: invoice.id || '',
+    paymentFailedEmailSentAt: sendAppBillingEmail
+      ? metadata.paymentFailedEmailSentAt || now.toISOString()
+      : metadata.paymentFailedEmailSentAt || ''
+  });
+
+  return { found: true, license: updated.data };
+}
+
+export async function handlePaymentActionRequired(invoice, eventId = '') {
+  const subscriptionId = subscriptionIdFromInvoice(invoice);
+  if (!subscriptionId) {
+    return { found: false };
+  }
+
+  const license = await findLicenseByMetadata('stripeSubscriptionId', subscriptionId);
+  if (!license) {
+    return { found: false };
+  }
+
+  const metadata = license.attributes?.metadata || {};
+  const now = new Date();
+  const failureWindow =
+    metadata.paymentFailureOpen === 'true'
+      ? {
+          paymentFailureOpen: 'true',
+          paymentFailureStartedAt: metadata.paymentFailureStartedAt,
+          paymentReminderDueAt: metadata.paymentReminderDueAt,
+          paymentSuspendDueAt: metadata.paymentSuspendDueAt
+        }
+      : buildFailureWindow(now);
+
+  await reinstateLicense(license.id);
+
+  const updated = await updateLicenseMetadata(license, {
+    ...failureWindow,
+    accessStatus: 'grace_period',
+    lastStripeEventType: 'invoice.payment_action_required',
+    lastStripeEventId: eventId,
+    lastPaymentActionRequiredInvoiceId: invoice.id || ''
+  });
+
+  return { found: true, license: updated.data };
+}
+
+export async function handlePaymentSucceeded(invoice, eventId = '') {
+  const subscriptionId = subscriptionIdFromInvoice(invoice);
+  if (!subscriptionId) {
+    return { found: false };
+  }
+
+  const license = await findLicenseByMetadata('stripeSubscriptionId', subscriptionId);
+  if (!license) {
+    return { found: false };
+  }
+
+  const metadata = license.attributes?.metadata || {};
+  const invoiceId = invoice.id || eventId;
+  const hadInterruptedAccess =
+    metadata.paymentFailureOpen === 'true' ||
+    metadata.accessStatus === 'grace_period' ||
+    metadata.accessStatus === 'suspended';
+  const subscription = await retrieveSubscription(subscriptionId);
+  const patch = subscriptionAccessPatch(subscription);
+  const restoredToActive = patch.accessStatus === 'active';
+
+  if (restoredToActive) {
+    await reinstateLicense(license.id);
+  }
+
+  if (
+    restoredToActive &&
+    hadInterruptedAccess &&
+    metadata.customerEmail &&
+    metadata.accessRestoredEmailSentForInvoiceId !== invoiceId
+  ) {
+    await sendAccessRestoredEmail({ email: metadata.customerEmail });
+    patch.accessRestoredEmailSentForInvoiceId = invoiceId;
+    patch.accessRestoredEmailSentAt = new Date().toISOString();
+  }
+
+  const updated = await updateLicenseMetadata(license, {
+    ...patch,
+    ...(restoredToActive
+      ? {
+          paymentFailureOpen: 'false',
+          paymentFailureStartedAt: '',
+          paymentReminderDueAt: '',
+          paymentSuspendDueAt: '',
+          paymentFailedEmailSentAt: '',
+          paymentPastDueEmailSentAt: '',
+          paymentReminderEmailSentAt: '',
+          paymentSuspendedEmailSentAt: ''
+        }
+      : {}),
+    lastStripeEventType: 'invoice.payment_succeeded',
+    lastStripeEventId: eventId,
+    lastPaymentSucceededInvoiceId: invoiceId
+  });
+
+  return { found: true, license: updated.data };
+}
+
+export async function handleChargeRefunded(charge, eventId = '') {
+  const invoiceId = invoiceIdFromCharge(charge);
+  if (!invoiceId) {
+    return { found: false };
+  }
+
+  const invoice = await retrieveInvoice(invoiceId);
+  const subscriptionId = subscriptionIdFromInvoice(invoice);
+  if (!subscriptionId) {
+    return { found: false };
+  }
+
+  const license = await findLicenseByMetadata('stripeSubscriptionId', subscriptionId);
+  if (!license) {
+    return { found: false };
+  }
+
+  const updated = await updateLicenseMetadata(license, {
+    lastStripeEventType: 'charge.refunded',
+    lastStripeEventId: eventId,
+    lastRefundedChargeId: charge.id || '',
+    lastRefundedInvoiceId: invoiceId,
+    lastRefundedPaymentIntentId:
+      typeof charge.payment_intent === 'string'
+        ? charge.payment_intent
+        : charge.payment_intent?.id || '',
+    lastRefundAmount: String(charge.amount_refunded ?? charge.amount ?? ''),
+    lastRefundCurrency: charge.currency || '',
+    lastRefundedAt: new Date().toISOString()
   });
 
   return { found: true, license: updated.data };
@@ -236,7 +387,13 @@ export async function processDueLicenseActions(now = new Date()) {
       metadata.paymentSuspendDueAt &&
       new Date(metadata.paymentSuspendDueAt).getTime() <= now.getTime();
 
-    if (email && reminderDue && !suspendDue && !metadata.paymentReminderEmailSentAt) {
+    if (
+      billingEmailsEnabled() &&
+      email &&
+      reminderDue &&
+      !suspendDue &&
+      !metadata.paymentReminderEmailSentAt
+    ) {
       await sendPaymentReminderEmail({ email });
       await updateLicenseMetadata(license, {
         paymentReminderEmailSentAt: now.toISOString()

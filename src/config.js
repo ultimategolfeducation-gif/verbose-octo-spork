@@ -30,11 +30,12 @@ export function getConfig() {
     mailerSendApiToken: process.env.MAILERSEND_API_TOKEN,
     mailerSendFromEmail: process.env.MAILERSEND_FROM_EMAIL,
     mailerSendFromName:
-      process.env.MAILERSEND_FROM_NAME || 'ForceMap by Ultimate Golf Education',
+      process.env.MAILERSEND_FROM_NAME || 'ForceMap™ by Ultimate Golf Education',
     mailerSendReplyToEmail:
       process.env.MAILERSEND_REPLY_TO_EMAIL || 'info@ultimategolfeducation.com',
     mailerSendReplyToName:
       process.env.MAILERSEND_REPLY_TO_NAME || 'Ultimate Golf Education',
+    appBillingEmailsEnabled: process.env.APP_BILLING_EMAILS_ENABLED === 'true',
     abuseAlertEmail: process.env.ABUSE_ALERT_EMAIL || 'info@ultimategolfeducation.com',
     downloadUrl: process.env.DOWNLOAD_URL,
     adminApiToken: process.env.ADMIN_API_TOKEN,
