@@ -8,6 +8,30 @@ export function secondsToIso(seconds) {
   return new Date(seconds * 1000).toISOString();
 }
 
+export function subscriptionPeriodEndSeconds(subscription) {
+  return (
+    subscription.current_period_end ||
+    subscription.items?.data?.[0]?.current_period_end ||
+    null
+  );
+}
+
+export function scheduledCancellationAtSeconds(subscription) {
+  if (subscription.status === 'canceled') {
+    return null;
+  }
+
+  if (subscription.cancel_at) {
+    return subscription.cancel_at;
+  }
+
+  if (subscription.cancel_at_period_end) {
+    return subscriptionPeriodEndSeconds(subscription);
+  }
+
+  return null;
+}
+
 export function getProductTypeFromSubscription(subscription) {
   const price = subscription.items?.data?.[0]?.price;
   const interval = price?.recurring?.interval;
@@ -37,10 +61,12 @@ export function shouldSendDueEmail(metadata, key, now = new Date()) {
 
 export function subscriptionAccessPatch(subscription, now = new Date()) {
   const status = subscription.status;
+  const periodEnd = subscriptionPeriodEndSeconds(subscription);
+  const cancellationAt = scheduledCancellationAtSeconds(subscription);
   const patch = {
     stripeSubscriptionStatus: status,
-    stripeCancelAtPeriodEnd: String(Boolean(subscription.cancel_at_period_end)),
-    stripeCurrentPeriodEnd: secondsToIso(subscription.current_period_end)
+    stripeCancelAtPeriodEnd: String(Boolean(cancellationAt)),
+    stripeCurrentPeriodEnd: secondsToIso(periodEnd)
   };
 
   if (status === 'active' || status === 'trialing') {
@@ -63,9 +89,9 @@ export function subscriptionAccessPatch(subscription, now = new Date()) {
     patch.accessStatus = 'suspended';
   }
 
-  if (subscription.cancel_at_period_end) {
+  if (cancellationAt) {
     patch.cancellationPending = 'true';
-    patch.cancelAccessAt = secondsToIso(subscription.current_period_end);
+    patch.cancelAccessAt = secondsToIso(cancellationAt);
   } else if (status !== 'canceled') {
     patch.cancellationPending = 'false';
     patch.cancelAccessAt = '';

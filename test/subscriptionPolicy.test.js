@@ -64,6 +64,26 @@ test('scheduled cancellations remain active until period end', () => {
   assert.equal(patch.cancelAccessAt, '2026-05-28T20:26:40.000Z');
 });
 
+test('scheduled cancellations support Stripe cancel_at and item period fields', () => {
+  const patch = subscriptionAccessPatch({
+    status: 'active',
+    cancel_at_period_end: false,
+    cancel_at: 1787536034,
+    items: {
+      data: [
+        {
+          current_period_end: 1787536034
+        }
+      ]
+    }
+  });
+
+  assert.equal(patch.accessStatus, 'active');
+  assert.equal(patch.cancellationPending, 'true');
+  assert.equal(patch.cancelAccessAt, '2026-08-24T01:47:14.000Z');
+  assert.equal(patch.stripeCurrentPeriodEnd, '2026-08-24T01:47:14.000Z');
+});
+
 test('failure window uses 24-hour reminder and 48-hour suspension', () => {
   const now = new Date('2026-05-31T10:00:00.000Z');
   const window = buildFailureWindow(now);

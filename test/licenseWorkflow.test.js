@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 
 import { setStripeClientForTests } from '../src/clients/stripeClient.js';
 import {
+  applySubscriptionState,
   customerNameFromSession,
   handleChargeRefunded,
   handlePaymentActionRequired
@@ -59,6 +60,7 @@ function testLicense(metadata = {}) {
     id: 'lic_123',
     type: 'licenses',
     attributes: {
+      suspended: false,
       key: 'FORCEMAP-TEST-KEY',
       metadata: {
         customerEmail: 'coach@example.com',
@@ -77,6 +79,76 @@ function keygenBody(data) {
     headers: { 'Content-Type': 'application/vnd.api+json' }
   });
 }
+
+test('active scheduled cancellation does not reinstate an already active licence', async () => {
+  const originalFetch = globalThis.fetch;
+  const originalEnv = {
+    KEYGEN_ACCOUNT_ID: process.env.KEYGEN_ACCOUNT_ID,
+    KEYGEN_API_TOKEN: process.env.KEYGEN_API_TOKEN
+  };
+  const license = testLicense({ customerEmail: '' });
+  const requests = [];
+
+  process.env.KEYGEN_ACCOUNT_ID = 'keygen-account';
+  process.env.KEYGEN_API_TOKEN = 'keygen-token';
+
+  globalThis.fetch = async (url, options = {}) => {
+    requests.push({ url: String(url), options });
+
+    if (String(url).includes('/licenses?')) {
+      return keygenBody({ data: [license] });
+    }
+    if (String(url).endsWith('/licenses/lic_123')) {
+      const body = JSON.parse(options.body);
+      return keygenBody({
+        data: {
+          ...license,
+          attributes: {
+            ...license.attributes,
+            metadata: body.data.attributes.metadata
+          }
+        }
+      });
+    }
+    throw new Error(`Unexpected request: ${url}`);
+  };
+
+  try {
+    const result = await applySubscriptionState(
+      {
+        id: 'sub_123',
+        status: 'active',
+        cancel_at_period_end: false,
+        cancel_at: 1787536034,
+        items: {
+          data: [{ current_period_end: 1787536034 }]
+        }
+      },
+      'customer.subscription.updated',
+      'evt_cancel'
+    );
+
+    assert.equal(result.found, true);
+    assert.equal(result.license.attributes.metadata.cancellationPending, 'true');
+    assert.equal(
+      result.license.attributes.metadata.cancelAccessAt,
+      '2026-08-24T01:47:14.000Z'
+    );
+    assert.equal(
+      requests.some((request) => request.url.endsWith('/actions/reinstate')),
+      false
+    );
+  } finally {
+    globalThis.fetch = originalFetch;
+    for (const [name, value] of Object.entries(originalEnv)) {
+      if (value === undefined) {
+        delete process.env[name];
+      } else {
+        process.env[name] = value;
+      }
+    }
+  }
+});
 
 test('payment action required updates licence state without sending a billing email', async () => {
   const originalFetch = globalThis.fetch;

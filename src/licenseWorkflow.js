@@ -10,7 +10,9 @@ import { getConfig } from './config.js';
 import {
   buildFailureWindow,
   getProductTypeFromSubscription,
+  scheduledCancellationAtSeconds,
   secondsToIso,
+  subscriptionPeriodEndSeconds,
   subscriptionAccessPatch
 } from './subscriptionPolicy.js';
 import {
@@ -111,10 +113,10 @@ export async function provisionLicenseFromCheckout(session) {
     stripeProductId:
       typeof price?.product === 'string' ? price.product : price?.product?.id || '',
     stripeSubscriptionStatus: subscription.status,
-    stripeCurrentPeriodEnd: secondsToIso(subscription.current_period_end) || '',
+    stripeCurrentPeriodEnd: secondsToIso(subscriptionPeriodEndSeconds(subscription)) || '',
     accessStatus: 'active',
     paymentFailureOpen: 'false',
-    cancellationPending: String(Boolean(subscription.cancel_at_period_end)),
+    cancellationPending: String(Boolean(scheduledCancellationAtSeconds(subscription))),
     createdBy: 'stripe.checkout.session.completed',
     createdAt: new Date().toISOString()
   };
@@ -154,16 +156,17 @@ export async function applySubscriptionState(subscription, eventType, eventId = 
     patch.paymentSuspendDueAt = metadata.paymentSuspendDueAt;
   }
 
-  if (patch.accessStatus === 'active') {
+  if (patch.accessStatus === 'active' && license.attributes?.suspended) {
     await reinstateLicense(license.id);
   }
 
-  if (patch.accessStatus === 'suspended') {
+  if (patch.accessStatus === 'suspended' && !license.attributes?.suspended) {
     await suspendLicense(license.id);
   }
 
-  if (subscription.cancel_at_period_end && email) {
-    const accessEndsAt = secondsToIso(subscription.current_period_end);
+  const cancellationAt = scheduledCancellationAtSeconds(subscription);
+  if (cancellationAt && email) {
+    const accessEndsAt = secondsToIso(cancellationAt);
     if (metadata.cancellationEmailSentForAccessEndsAt !== accessEndsAt) {
       await sendCancellationEmail({ email, accessEndsAt });
       patch.cancellationEmailSentForAccessEndsAt = accessEndsAt;
